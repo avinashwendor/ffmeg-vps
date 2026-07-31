@@ -85,6 +85,11 @@ export function srtToAss(srt, style = {}) {
   const size = style.size || 52;
   const primary = hexToAss(style.color, '&H00FFFFFF');
   const outline = hexToAss(style.outline_color, '&H00000000');
+  // Reels and Shorts overlay the caption, handle and action buttons across the
+  // bottom of the frame. At 1920 tall that furniture eats roughly the lowest
+  // 320px, so subtitles sitting at 120 were being covered on the exact device
+  // people watch this on.
+  const marginV = Number(style.margin_v) || 340;
   const blocks = String(srt || '').trim().split(/\n\n+/);
   const events = [];
   for (const block of blocks) {
@@ -103,7 +108,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${size},${primary},&H000000FF,${outline},&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,40,40,120,1
+Style: Default,${font},${size},${primary},&H000000FF,${outline},&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -119,6 +124,36 @@ function defaultRecipe() {
     audio: { voiceover_gain_db: 0, clip_audio_gain_db: -20, fade_in_ms: 200, fade_out_ms: 400 },
     subtitles: { mode: 'burn', font: 'Arial', size: 52, color: '#FFFFFF', outline_color: '#000000' },
     color: { saturation: 1.08, contrast: 1.05, brightness: 0.01 },
+  };
+}
+
+// The generator plans against an assumed clip length, but the clip that
+// actually turns up decides what is possible: Veo returns 8s, Gemini Omni 10s,
+// and an extended clip can be much longer. What the plan really asks for is
+// "keep clip N on screen for this many seconds" — so honour that against the
+// real footage, and only slow the clip down when there genuinely is not enough.
+export function fitToFootage(spec, actualDuration) {
+  const trimStart = Math.max(0, Number(spec.trim_start || 0));
+  const speed = Number(spec.speed) > 0 ? Number(spec.speed) : 1;
+  const planned = spec.trim_end == null ? null : Number(spec.trim_end) - trimStart;
+  const actual = Number(actualDuration) || 0;
+
+  // No duration probe and no plan: use the whole clip as-is.
+  if (!actual) return { ...spec, trim_start: trimStart, speed };
+
+  const wanted = planned == null ? actual / speed : planned / speed;
+  const available = Math.max(0, actual - trimStart);
+
+  if (available >= wanted) {
+    // Enough footage — take exactly what is needed and drop the slow-motion.
+    return { ...spec, trim_start: trimStart, trim_end: trimStart + wanted, speed: 1 };
+  }
+  // Short clip: use all of it and stretch to fill, but not into a visible stutter.
+  return {
+    ...spec,
+    trim_start: trimStart,
+    trim_end: actual,
+    speed: Math.max(0.5, available / wanted),
   };
 }
 
@@ -197,9 +232,15 @@ async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
 
   const dur = await ffprobeDuration(videoPath);
   const fadeOutStart = Math.max(0, dur - fadeOut);
-  const af = voGain === 0
-    ? `afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}`
-    : `volume=${voGain}dB,afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}`;
+  // Bring the voiceover to the loudness social platforms normalise to. Without
+  // this, a quiet TTS take gets turned up by the platform along with its noise
+  // floor, and a hot one gets pulled down mid-sentence.
+  const af = [
+    voGain === 0 ? null : `volume=${voGain}dB`,
+    'loudnorm=I=-16:TP=-1.5:LRA=11',
+    `afade=t=in:st=0:d=${fadeIn}`,
+    `afade=t=out:st=${fadeOutStart}:d=${fadeOut}`,
+  ].filter(Boolean).join(',');
 
   await run('ffmpeg', [
     '-y', '-i', videoPath, '-i', voicePath,
@@ -234,11 +275,8 @@ export async function renderReel({ workDir, clipUrls, voiceoverUrl, subtitlesSrt
     const normPath = join(workDir, `clip-${index}-norm.mp4`);
     await downloadToFile(url, rawPath);
     const spec = r.per_clip.find((p) => Number(p.index) === index) || { index, trim_start: 0 };
-    if (spec.trim_end == null) {
-      const dur = await ffprobeDuration(rawPath);
-      spec.trim_end = dur;
-    }
-    await normalizeClip(rawPath, normPath, spec, r.color);
+    const actual = await ffprobeDuration(rawPath);
+    await normalizeClip(rawPath, normPath, fitToFootage(spec, actual), r.color);
     normalized.push(normPath);
   }
 

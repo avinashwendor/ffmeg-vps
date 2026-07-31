@@ -18,21 +18,19 @@ OPENROUTER_MODEL_HEAVY = "anthropic/claude-sonnet-5"
 S3_IMAGES_PREFIX = "images/"
 
 # ── REEL TIMING ───────────────────────────────────────────
-# Google Flow returns 8-second clips, so the whole reel is a fixed 5 x 8 grid.
-# Every downstream stage derives its timing from these three numbers rather than
-# hardcoding 8s / 40s in a dozen places.
-CLIP_COUNT = 5
-CLIP_SEC = 8
-TOTAL_SEC = CLIP_COUNT * CLIP_SEC
-# Natural pace for an energetic short. Used to budget words per scene up front
-# and to sanity-check the rendered voiceover afterwards.
-WORDS_PER_SEC = 2.6
-WORDS_PER_CLIP = round(CLIP_SEC * WORDS_PER_SEC)  # 21
-WORDS_MIN = WORDS_PER_CLIP - 3
-WORDS_MAX = WORDS_PER_CLIP + 1
-# ElevenLabs mp3_44100_128 and Cartesia mp3 @ 128000 are both constant bitrate,
-# so voiceover duration can be derived from the file size before render.
-VOICEOVER_BITRATE = 128000
+# See build/reel_timing.py — one grid, shared with the tests.
+from reel_timing import (  # noqa: E402
+    CLIP_COUNT,
+    CLIP_SEC,
+    TAIL_SEC,
+    TOTAL_SEC,
+    TRANSITION_SEC,
+    USABLE_SEC,
+    VOICEOVER_BITRATE,
+    WORDS_MAX,
+    WORDS_MIN,
+    WORDS_PER_SEC,
+)
 
 # ── RAILWAY S3 BUCKET ─────────────────────────────────────
 RAILWAY_S3_ENDPOINT_HOST = "t3.storageapi.dev"
@@ -1253,7 +1251,7 @@ EACH SCENE OBJECT
 
 THE {CLIP_SEC}-SECOND BUDGET — nothing downstream can correct a miss here
 - Every voiceover_segment is {WORDS_MIN}-{WORDS_MAX} words. Count them. Not {WORDS_MIN - 5}, not {WORDS_MAX + 5}.
-- The five segments together total {WORDS_MIN * CLIP_COUNT}-{WORDS_MAX * CLIP_COUNT} words, which is {TOTAL_SEC} seconds at natural pace.
+- The five segments together total {WORDS_MIN * CLIP_COUNT}-{WORDS_MAX * CLIP_COUNT} words. That is {USABLE_SEC:.0f} seconds at natural pace, which is what {CLIP_COUNT} clips of {CLIP_SEC} seconds come to once the crossfades between them are taken out.
 - They are read with no pause inserted between them, so the last word of one segment must flow straight into the first word of the next. Each segment is still a complete thought.
 - voiceover_segment is spoken aloud character for character. No stage directions, no speaker labels, no emoji, no bracketed notes, no ellipses.
 - Spell out anything a speech engine would mangle: "twenty-four seven" not "24/7", "eighty thousand rupees" not "Rs 80,000", "U P I" not "UPI", "two point five times" not "2.5x".
@@ -1578,12 +1576,12 @@ const CLIP_SEC = {CLIP_SEC};
 const TOTAL_SEC = {TOTAL_SEC};
 const WORDS_PER_SEC = {WORDS_PER_SEC};
 const BITRATE = {VOICEOVER_BITRATE};
-const TRANSITION_SEC = 0.3;
+const TRANSITION_SEC = {TRANSITION_SEC};
 // Slowing a clip below this looks like a glitch rather than a choice.
 const MIN_SPEED = 0.8;
 // The render muxes with -shortest, so the picture has to outlast the audio by a
 // hair or the last word gets clipped off the end.
-const TAIL_SEC = 0.25;
+const TAIL_SEC = {TAIL_SEC};
 
 function round2(n) {{ return Number(Number(n).toFixed(2)); }}
 

@@ -19,6 +19,7 @@ if str(BUILD_DIR) not in sys.path:
     sys.path.insert(0, str(BUILD_DIR))
 
 from paths import MAIN_WORKFLOW_JSON
+from reel_timing import CLIP_COUNT, CLIP_SEC, TOTAL_SEC, WORDS_PER_CLIP
 
 # A fake bucket and fake upstreams behind the same this.helpers.httpRequest
 # surface the Code nodes use, so the nodes run unmodified.
@@ -62,13 +63,16 @@ function check(label, actual, expected) {
   console.log(`  ${ok ? 'pass' : 'FAIL'}  ${label}`);
 }
 
-const WORDS = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty';
 const mp3Bytes = (sec) => Math.round((sec * 128000) / 8);
+// An exactly-on-budget scene for whatever grid reel_timing.py currently sets,
+// so these assertions stay meaningful if CLIP_SEC changes.
+const WORDS = Array.from({ length: WORDS_PER_CLIP }, (_, i) => `w${i + 1}`).join(' ');
+const ON_BUDGET_SEC = Number((WORDS_PER_CLIP * CLIP_COUNT / 2.6).toFixed(2));
 
 async function main() {
   // ---- the generate pipeline: script -> timing -> sync map ----------------
   console.log('\nscript timing and sync');
-  const scenes = [0, 1, 2, 3, 4].map((i) => ({
+  const scenes = Array.from({ length: CLIP_COUNT }, (_, i) => ({
     narrative_beat: ['HOOK', 'SETUP', 'PROOF', 'EMOTION', 'CTA'][i],
     voiceover_segment: (i === 0 ? '[cut to machine] ' : '') + WORDS,
     visual_brief: 'brief', on_screen_text: '', what_happened_before: 'b',
@@ -83,27 +87,27 @@ async function main() {
   check('stage directions are stripped before TTS', ctx.script.scenes[0].voiceover_segment.includes('['), false);
   check('voiceover text is exactly the scene segments joined',
     ctx.script.full_script === ctx.script.scenes.map((s) => s.voiceover_segment).join(' '), true);
-  check('word budget counted per scene', ctx.script.scenes.map((s) => s.word_count), [20, 20, 20, 20, 20]);
+  check('word budget counted per scene', ctx.script.scenes.map((s) => s.word_count), Array(CLIP_COUNT).fill(WORDS_PER_CLIP));
 
   ctx = (await runNode('Build Sync Map', { json: { ...ctx,
-    voiceover_bytes: mp3Bytes(38.5),
+    voiceover_bytes: mp3Bytes(ON_BUDGET_SEC),
     voiceover_url: 'https://b/vo.mp3',
-    matched_scenes: [0, 1, 2, 3, 4].map((i) => ({ scene_index: i, reference_image_name: `part${i + 1} shot`, reference_image_url: `https://b/i${i}` })),
+    matched_scenes: Array.from({ length: CLIP_COUNT }, (_, i) => ({ scene_index: i, reference_image_name: `part${i + 1} shot`, reference_image_url: `https://b/i${i}` })),
   }}))[0].json;
 
-  check('voiceover length read from the mp3', ctx.voiceover_sec, 38.5);
+  check('voiceover length read from the mp3', ctx.voiceover_sec, ON_BUDGET_SEC);
   check('clip windows are contiguous',
     ctx.sync_windows.every((w, i, a) => i === 0 || w.vo_start === a[i - 1].vo_end), true);
-  check('last window ends on the last word', ctx.sync_windows[4].vo_end, ctx.voiceover_sec);
+  check('last window ends on the last word', ctx.sync_windows[CLIP_COUNT - 1].vo_end, ctx.voiceover_sec);
   check('picture outlasts the voiceover so -shortest cannot clip it', ctx.render_drift_sec > 0, true);
-  check('an on-budget script needs no speed change', ctx.sync_windows.map((w) => w.render.speed), [1, 1, 1, 1, 1]);
+  check('an on-budget script needs no speed change', ctx.sync_windows.map((w) => w.render.speed), Array(CLIP_COUNT).fill(1));
   check('subtitles were generated from that same timeline', ctx.subtitles_srt.split('\n\n').length > 5, true);
   check('no sync warnings on an on-budget script', ctx.sync_warnings, []);
 
   // An over-long scene must be reported, not silently mangled.
   const longScenes = scenes.map((s, i) => (i === 2 ? { ...s, voiceover_segment: WORDS + ' ' + WORDS } : s));
   let over = (await runNode('Normalize Script Timing', { json: { run_id: 'R2', script: { scenes: longScenes, production_bible: {} } } }))[0].json;
-  over = (await runNode('Build Sync Map', { json: { ...over, voiceover_bytes: mp3Bytes(46), matched_scenes: [] } }))[0].json;
+  over = (await runNode('Build Sync Map', { json: { ...over, voiceover_bytes: mp3Bytes(ON_BUDGET_SEC * 1.2), matched_scenes: [] } }))[0].json;
   check('an over-long scene is reported', over.sync_warnings.some((w) => w.includes('runs long')), true);
   check('and so is the resulting short video', over.sync_warnings.some((w) => w.includes('before the voiceover')), true);
 
@@ -138,7 +142,7 @@ async function main() {
   // ---- compose ------------------------------------------------------------
   console.log('\ncompose session');
   const manifest = { run_id: 'R1', selected_topic: { title: 'T' }, voiceover_key: 'reels-voiceovers/x.mp3',
-    voiceover_sec: 38.5, transition_sec: 0.3, subtitles_srt: '1\n00:00:00,000 --> 00:00:02,000\nhi',
+    voiceover_sec: ON_BUDGET_SEC, transition_sec: 0.3, subtitles_srt: '1\n00:00:00,000 --> 00:00:02,000\nhi',
     production_bible: {}, sync_windows: ctx.sync_windows.map((w) => ({ clip_number: w.clip_number, narrative_beat: w.narrative_beat, vo_seconds: w.vo_seconds, spoken_text: w.spoken_text })),
     render_plan: ctx.sync_windows.map((w) => w.render) };
   BUCKET.set('reels-manifests/R1.json', JSON.stringify(manifest));
@@ -227,7 +231,16 @@ def main():
         for n in workflow["nodes"]
         if n.get("parameters", {}).get("jsCode")
     }
-    script = f"const NODES = {json.dumps(code)};\n{HARNESS}"
+    # The harness asserts against the current grid, so hand it the same
+    # constants the builder used rather than repeating 5 / 10 / 26 in JS.
+    preamble = "\n".join([
+        f"const CLIP_COUNT = {CLIP_COUNT};",
+        f"const CLIP_SEC = {CLIP_SEC};",
+        f"const TOTAL_SEC = {TOTAL_SEC};",
+        f"const WORDS_PER_CLIP = {WORDS_PER_CLIP};",
+        f"const NODES = {json.dumps(code)};",
+    ])
+    script = f"{preamble}\n{HARNESS}"
     with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False, encoding="utf-8") as f:
         f.write(script)
         path = f.name
