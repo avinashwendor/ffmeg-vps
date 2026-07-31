@@ -3,6 +3,31 @@ import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { downloadToFile } from './s3.js';
 
+// ffmpeg sizes its thread pools from the *host* core count, not the container's
+// memory limit. On a big host that means x264 keeps (threads + lookahead)
+// 1080x1920 frames in flight — hundreds of MB — and the OOM killer takes the
+// process out mid-encode, which surfaces here as a null exit code. Capping
+// threads is what keeps a multi-clip render alive in a small container.
+const FFMPEG_THREADS = String(Number(process.env.FFMPEG_THREADS) || 2);
+const X264_PRESET = process.env.FFMPEG_PRESET || 'veryfast';
+const X264_CRF = String(Number(process.env.FFMPEG_CRF) || 21);
+
+function encodeArgs() {
+  return [
+    '-c:v', 'libx264',
+    '-preset', X264_PRESET,
+    '-crf', X264_CRF,
+    '-threads', FFMPEG_THREADS,
+    // Without a bounded lookahead x264 still buffers frames per thread.
+    '-x264-params', `threads=${FFMPEG_THREADS}:lookahead-threads=1:sliced-threads=0:rc-lookahead=20`,
+    '-pix_fmt', 'yuv420p',
+  ];
+}
+
+function filterThreadArgs() {
+  return ['-filter_threads', FFMPEG_THREADS, '-filter_complex_threads', FFMPEG_THREADS];
+}
+
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
@@ -10,9 +35,18 @@ function run(cmd, args, opts = {}) {
     let stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    child.on('close', (code) => {
-      if (code === 0) resolve({ stdout, stderr });
-      else reject(new Error(`${cmd} exited ${code}: ${stderr.slice(-1200)}`));
+    child.on('error', (err) => reject(new Error(`${cmd} failed to start: ${err.message}`)));
+    child.on('close', (code, signal) => {
+      if (code === 0) { resolve({ stdout, stderr }); return; }
+      if (code === null) {
+        // Killed rather than exited — almost always the container OOM killer.
+        reject(new Error(
+          `${cmd} was killed by ${signal || 'the OS'} — the container ran out of memory. ` +
+          `Raise the service memory or lower FFMPEG_THREADS (currently ${FFMPEG_THREADS}).`
+        ));
+        return;
+      }
+      reject(new Error(`${cmd} exited ${code}: ${stderr.slice(-1200)}`));
     });
   });
 }
@@ -123,12 +157,11 @@ async function normalizeClip(inputPath, outputPath, clipSpec, color) {
     `setsar=1`,
   ].filter(Boolean).join(',');
 
-  const args = ['-y', '-ss', String(trimStart)];
+  const args = ['-y', ...filterThreadArgs(), '-ss', String(trimStart)];
   // -t (duration) rather than -to, so the window is unambiguous once -ss has
   // already moved the input position.
   if (trimEnd != null && trimEnd > trimStart) args.push('-t', String(trimEnd - trimStart));
-  args.push('-i', inputPath, '-an', '-vf', vf);
-  args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', outputPath);
+  args.push('-i', inputPath, '-an', '-vf', vf, ...encodeArgs(), outputPath);
   await run('ffmpeg', args);
 }
 
@@ -137,32 +170,24 @@ async function concatClips(clipPaths, outputPath, transitionMs = 300) {
     await fs.copyFile(clipPaths[0], outputPath);
     return;
   }
-  if (clipPaths.length === 2) {
-    const d0 = await ffprobeDuration(clipPaths[0]);
-    const offset = Math.max(0, d0 - transitionMs / 1000);
-    await run('ffmpeg', [
-      '-y', '-i', clipPaths[0], '-i', clipPaths[1],
-      '-filter_complex', `[0:v][1:v]xfade=transition=fade:duration=${transitionMs / 1000}:offset=${offset}[v]`,
-      '-map', '[v]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-an', outputPath,
-    ]);
-    return;
-  }
-
-  // Chain xfade for 3+ clips
+  // Chain xfade pairwise. A single filter_complex over all five would decode
+  // every clip at once, which is the opposite of what a memory-capped
+  // container wants.
   let current = clipPaths[0];
   const tmpDir = dirname(outputPath);
   for (let i = 1; i < clipPaths.length; i++) {
-    const nextOut = join(tmpDir, `xfade_${i}.mp4`);
+    const isLast = i === clipPaths.length - 1;
+    const nextOut = isLast ? outputPath : join(tmpDir, `xfade_${i}.mp4`);
     const d = await ffprobeDuration(current);
     const offset = Math.max(0, d - transitionMs / 1000);
     await run('ffmpeg', [
-      '-y', '-i', current, '-i', clipPaths[i],
+      '-y', ...filterThreadArgs(), '-i', current, '-i', clipPaths[i],
       '-filter_complex', `[0:v][1:v]xfade=transition=fade:duration=${transitionMs / 1000}:offset=${offset}[v]`,
-      '-map', '[v]', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', '-an', nextOut,
+      '-map', '[v]', '-an', ...encodeArgs(), nextOut,
     ]);
+    if (current !== clipPaths[0]) await fs.rm(current, { force: true });
     current = nextOut;
   }
-  await fs.copyFile(current, outputPath);
 }
 
 async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
@@ -188,9 +213,9 @@ async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
 async function burnSubtitles(videoPath, assPath, outputPath) {
   const vf = `subtitles='${escapePath(assPath)}'`;
   await run('ffmpeg', [
-    '-y', '-i', videoPath,
+    '-y', ...filterThreadArgs(), '-i', videoPath,
     '-vf', vf,
-    '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
+    ...encodeArgs(),
     '-c:a', 'copy',
     outputPath,
   ]);
