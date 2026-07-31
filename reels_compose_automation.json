@@ -1,0 +1,550 @@
+{
+  "name": "Reels Compose Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "download": true
+        }
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "id": "73c93070-444d-4027-a957-368548e2943c",
+      "name": "Telegram Trigger",
+      "webhookId": "57c5f754-5ae1-4203-96c5-ef4fe7fe4aa0"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sessions) staticData.sessions = {};\n\nconst msg = $json.message || {};\nconst chatId = String(msg.chat?.id || '');\nconst text = String(msg.text || msg.caption || '').trim();\nconst from = msg.from || {};\n\nif (from.is_bot) {\n  return [{ json: { action: 'reply', chat_id: chatId, reply_text: 'Use your personal Telegram account, not a bot.' } }];\n}\nif (!chatId) return [];\n\nconst video = msg.video;\nconst doc = msg.document;\nconst isVideoDoc = doc && /^video\\//i.test(String(doc.mime_type || ''));\nconst isClip = !!(video || isVideoDoc);\n\nlet action = 'ignore';\nif (/^\\/compose\\b/i.test(text)) action = 'compose_start';\nelse if (/^done$/i.test(text)) action = 'done';\nelse if (/^\\/cancel$/i.test(text)) action = 'cancel';\nelse if (/^\\/status$/i.test(text)) action = 'status';\nelse if (isClip) action = 'clip_upload';\n\nconst runIdMatch = text.match(/^\\/compose\\s+(\\S+)/i);\nconst captionIndex = text.match(/^(?:clip\\s*)?(\\d)\\s*$/i) || text.match(/^(\\d)\\s*\\/\\s*5$/);\n\nreturn [{\n  json: {\n    action,\n    chat_id: chatId,\n    text,\n    run_id: runIdMatch ? runIdMatch[1].trim() : null,\n    caption_index: captionIndex ? Number(captionIndex[1]) : null,\n    file_id: video?.file_id || doc?.file_id || null,\n    file_name: doc?.file_name || `clip-${Date.now()}.mp4`,\n    message: msg,\n  },\n  binary: $input.first().binary,\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        300
+      ],
+      "id": "a2476524-e1d9-4a4c-a102-b299463c631f",
+      "name": "Parse Incoming"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ae042882-5362-4a7e-a24f-0ef45e9458dc",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "compose_start",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        300
+      ],
+      "id": "688426fc-5db8-48bf-bd6a-d48366d33a54",
+      "name": "IF Compose Start"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3d48be57-3081-4830-865a-8fd2dbd577dd",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "clip_upload",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        420
+      ],
+      "id": "2944befe-aa7c-4430-88e1-517bfc0e9440",
+      "name": "IF Clip Upload"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0e69cd8f-e2e2-49e5-b52f-5edd385e83c2",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "done",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        540
+      ],
+      "id": "3211583f-f9d0-4967-9813-1af155fc44a5",
+      "name": "IF Done"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "df24d4de-0928-4904-b28c-481b4387a686",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "status",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "41339fd1-ee25-462b-8947-bb6bafc0fe0e",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "cancel",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        660
+      ],
+      "id": "381d135a-da22-4da5-a75f-130246cc3ce8",
+      "name": "IF Status Cancel"
+    },
+    {
+      "parameters": {
+        "jsCode": "const te = new TextEncoder();\nconst ENDPOINT_HOST = \"t3.storageapi.dev\";\nconst BUCKET = \"lightweight-vault-pew0g4o\";\nconst REGION = \"auto\";\nconst ACCESS_KEY = \"YOUR_S3_ACCESS_KEY\";\nconst SECRET_KEY = \"YOUR_S3_SECRET_KEY\";\nconst EXPIRES = 604800;\nconst IMAGES_PREFIX = \"images/\";\n\nfunction toHex(bytes) {\n  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');\n}\nfunction toBytes(data) {\n  if (typeof data === 'string') return te.encode(data);\n  if (data instanceof Uint8Array) return data;\n  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);\n  return te.encode(String(data));\n}\nfunction toBase64(bytes) {\n  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);\n  let bin = '';\n  for (let i = 0; i < u8.length; i += 0x8000) {\n    bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));\n  }\n  return btoa(bin);\n}\nfunction fromBase64(b64) {\n  const bin = atob(b64);\n  const bytes = new Uint8Array(bin.length);\n  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);\n  return bytes;\n}\nfunction rotr(n, x) { return (x >>> n) | (x << (32 - n)); }\nconst SHA_K = new Uint32Array([\n  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,\n  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,\n  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,\n  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,\n  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,\n  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,\n  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,\n  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2\n]);\nfunction sha256Raw(msgBytes) {\n  const l = msgBytes.length;\n  const withLen = new Uint8Array(((l + 9 + 63) >> 6) << 6);\n  withLen.set(msgBytes);\n  withLen[l] = 0x80;\n  const bitLen = l * 8;\n  const dv = new DataView(withLen.buffer);\n  dv.setUint32(withLen.length - 4, bitLen >>> 0, false);\n  dv.setUint32(withLen.length - 8, Math.floor(bitLen / 0x100000000), false);\n  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;\n  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;\n  const w = new Uint32Array(64);\n  for (let off = 0; off < withLen.length; off += 64) {\n    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4, false);\n    for (let i = 16; i < 64; i++) {\n      const s0 = rotr(7, w[i - 15]) ^ rotr(18, w[i - 15]) ^ (w[i - 15] >>> 3);\n      const s1 = rotr(17, w[i - 2]) ^ rotr(19, w[i - 2]) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, hh = h7;\n    for (let i = 0; i < 64; i++) {\n      const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (hh + S1 + ch + SHA_K[i] + w[i]) >>> 0;\n      const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;\n    }\n    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;\n    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + hh) >>> 0;\n  }\n  const out = new Uint8Array(32);\n  const outDv = new DataView(out.buffer);\n  outDv.setUint32(0, h0, false); outDv.setUint32(4, h1, false); outDv.setUint32(8, h2, false); outDv.setUint32(12, h3, false);\n  outDv.setUint32(16, h4, false); outDv.setUint32(20, h5, false); outDv.setUint32(24, h6, false); outDv.setUint32(28, h7, false);\n  return out;\n}\nfunction sha256(data) {\n  return toHex(sha256Raw(toBytes(data)));\n}\nfunction hmacSha256(key, data) {\n  const block = 64;\n  let k = toBytes(key);\n  if (k.length > block) k = sha256Raw(k);\n  if (k.length < block) {\n    const padded = new Uint8Array(block);\n    padded.set(k);\n    k = padded;\n  }\n  const o = new Uint8Array(block);\n  const i = new Uint8Array(block);\n  for (let j = 0; j < block; j++) {\n    o[j] = k[j] ^ 0x5c;\n    i[j] = k[j] ^ 0x36;\n  }\n  const dataBytes = toBytes(data);\n  const inner = new Uint8Array(block + dataBytes.length);\n  inner.set(i);\n  inner.set(dataBytes, block);\n  const outer = new Uint8Array(block + 32);\n  outer.set(o);\n  outer.set(sha256Raw(inner), block);\n  return sha256Raw(outer);\n}\nfunction getSigningKey(dateStamp) {\n  const kDate = hmacSha256('AWS4' + SECRET_KEY, dateStamp);\n  const kRegion = hmacSha256(kDate, REGION);\n  const kService = hmacSha256(kRegion, 's3');\n  return hmacSha256(kService, 'aws4_request');\n}\nfunction encodePath(key) {\n  return key.split('/').map((part) => encodeURIComponent(part)).join('/');\n}\nfunction hostName() {\n  return `${BUCKET}.${ENDPOINT_HOST}`;\n}\nasync function s3Request(method, host, path, headers, body) {\n  const options = {\n    method,\n    url: `https://${host}${path}`,\n    headers: { ...headers, Accept: '*/*' },\n    json: false,\n    encoding: 'text',\n  };\n  const bytes = body && body.length ? toBytes(body) : null;\n  if (bytes) options.body = typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes;\n  try {\n    const res = await this.helpers.httpRequest(options);\n    return typeof res === 'string' ? res : JSON.stringify(res);\n  } catch (err) {\n    const status = err.statusCode || err.response?.statusCode || '';\n    throw new Error(`S3 ${method} ${status}: ${err.message || err}`);\n  }\n}\nfunction signPut(key, body, contentType) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const payloadHash = sha256(body);\n  const headerMap = {\n    'content-type': contentType,\n    host,\n    'x-amz-content-sha256': payloadHash,\n    'x-amz-date': amzDate,\n  };\n  const signedNames = Object.keys(headerMap).sort();\n  const canonicalHeaders = signedNames.map((name) => `${name}:${headerMap[name]}\\n`).join('');\n  const signedHeaders = signedNames.join(';');\n  const canonicalRequest = ['PUT', '/' + encodePath(key), '', canonicalHeaders, signedHeaders, payloadHash].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  const authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;\n  return { host, authorization, amzDate, payloadHash };\n}\nfunction describeS3Error(err) {\n  const status = err.statusCode || err.response?.statusCode || err.httpCode || '';\n  const body = err.response?.body ?? err.response?.data ?? err.cause?.response?.body;\n  if (typeof body === 'string') return `HTTP ${status}: ${body.slice(0, 500)}`;\n  if (body && typeof body === 'object') {\n    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(body)) return `HTTP ${status}: ${body.toString('utf8').slice(0, 500)}`;\n    return `HTTP ${status}: ${JSON.stringify(body).slice(0, 500)}`;\n  }\n  return `HTTP ${status || 'error'}: ${err.message || err}`;\n}\nasync function putObject(key, body, contentType = 'application/octet-stream') {\n  const bytes = toBytes(body);\n  const { host, authorization, amzDate, payloadHash } = signPut(key, bytes, contentType);\n  const path = `/${encodePath(key)}`;\n  try {\n    await this.helpers.httpRequest({\n      method: 'PUT',\n      url: `https://${host}${path}`,\n      headers: {\n        'Content-Type': contentType,\n        'x-amz-content-sha256': payloadHash,\n        'x-amz-date': amzDate,\n        Authorization: authorization,\n      },\n      body: typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes,\n      json: false,\n    });\n  } catch (err) {\n    throw new Error(`S3 PUT ${describeS3Error(err)}`);\n  }\n}\nfunction telegramSafeUrl(url) {\n  return String(url).replace(/_/g, '%5F');\n}\nfunction presignGetUrl(key) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const credential = `${ACCESS_KEY}/${dateStamp}/${REGION}/s3/aws4_request`;\n  const params = {\n    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',\n    'X-Amz-Credential': credential,\n    'X-Amz-Date': amzDate,\n    'X-Amz-Expires': String(EXPIRES),\n    'X-Amz-SignedHeaders': 'host',\n  };\n  const query = Object.keys(params).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');\n  const canonicalRequest = ['GET', '/' + encodePath(key), query, `host:${host}\\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  return telegramSafeUrl(`https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`);\n}\nfunction presignPutUrl(key, contentType) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const credential = `${ACCESS_KEY}/${dateStamp}/${REGION}/s3/aws4_request`;\n  const params = {\n    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',\n    'X-Amz-Credential': credential,\n    'X-Amz-Date': amzDate,\n    'X-Amz-Expires': String(EXPIRES),\n    'X-Amz-SignedHeaders': 'content-type;host',\n  };\n  const query = Object.keys(params).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');\n  const canonicalHeaders = `content-type:${contentType}\\nhost:${host}\\n`;\n  const signedHeaders = 'content-type;host';\n  const canonicalRequest = ['PUT', '/' + encodePath(key), query, canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  return telegramSafeUrl(`https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`);\n}\nfunction signList(prefix) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const queryParams = { 'list-type': '2', prefix };\n  const canonicalQuery = Object.keys(queryParams).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(queryParams[k])}`).join('&');\n  const payloadHash = sha256('');\n  const canonicalHeaders = `host:${host}\\nx-amz-content-sha256:${payloadHash}\\nx-amz-date:${amzDate}\\n`;\n  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';\n  const canonicalRequest = ['GET', '/', canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  const authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;\n  return { host, authorization, amzDate, payloadHash, canonicalQuery };\n}\nasync function listObjects(prefix) {\n  const { host, authorization, amzDate, payloadHash, canonicalQuery } = signList(prefix);\n  const xml = await s3Request.call(this, 'GET', host, `/?${canonicalQuery}`, {\n    'x-amz-content-sha256': payloadHash,\n    'x-amz-date': amzDate,\n    Authorization: authorization,\n  });\n  return [...xml.matchAll(/<Key>([^<]+)<\\/Key>/g)].map((m) => m[1]);\n}\nfunction fileNameToLabel(fileName) {\n  const base = fileName.replace(/\\.[^.]+$/, '');\n  return base.replace(/[-_]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\nfunction isImageKey(key) {\n  return /\\.(jpe?g|png|webp|gif)$/i.test(key);\n}\nconst chatId = $json.chat_id;\nconst runId = $json.run_id;\nif (!runId) throw new Error('Usage: /compose RUN_ID (example: /compose 2026-07-30-0930)');\n\nconst staticData = $getWorkflowStaticData('global');\nif (!staticData.sessions) staticData.sessions = {};\n\nconst key = `reels-manifests/${runId}.json`;\nconst manifestUrl = presignGetUrl(key);\nlet manifest;\ntry {\n  const raw = await this.helpers.httpRequest({ method: 'GET', url: manifestUrl, json: false, timeout: 60000 });\n  const text = typeof raw === 'string' ? raw : JSON.stringify(raw);\n  manifest = JSON.parse(text);\n} catch (err) {\n  throw new Error(`Manifest not found for run_id \"${runId}\". Run the reels generator first, or check the run_id. (${err.message || err})`);\n}\n\nstaticData.sessions[chatId] = {\n  state: 'collecting',\n  run_id: runId,\n  chat_id: chatId,\n  manifest,\n  clips: [],\n  started_at: Date.now(),\n  expires_at: Date.now() + 2 * 60 * 60 * 1000,\n};\n\nconst title = manifest.selected_topic?.title || manifest.run_id;\nreturn [{\n  json: {\n    chat_id: chatId,\n    reply_text: `Compose session started\\nTopic: ${title}\\nRun: ${runId}\\n\\nUpload 5 Flow clips (caption optional: 1-5).\\nSend done when finished.\\n/cancel to abort.`,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        240
+      ],
+      "id": "efd1fbb4-91b1-4279-a26c-03bb99a3379e",
+      "name": "Handle Compose Start"
+    },
+    {
+      "parameters": {
+        "jsCode": "const te = new TextEncoder();\nconst ENDPOINT_HOST = \"t3.storageapi.dev\";\nconst BUCKET = \"lightweight-vault-pew0g4o\";\nconst REGION = \"auto\";\nconst ACCESS_KEY = \"YOUR_S3_ACCESS_KEY\";\nconst SECRET_KEY = \"YOUR_S3_SECRET_KEY\";\nconst EXPIRES = 604800;\nconst IMAGES_PREFIX = \"images/\";\n\nfunction toHex(bytes) {\n  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');\n}\nfunction toBytes(data) {\n  if (typeof data === 'string') return te.encode(data);\n  if (data instanceof Uint8Array) return data;\n  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);\n  return te.encode(String(data));\n}\nfunction toBase64(bytes) {\n  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);\n  let bin = '';\n  for (let i = 0; i < u8.length; i += 0x8000) {\n    bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));\n  }\n  return btoa(bin);\n}\nfunction fromBase64(b64) {\n  const bin = atob(b64);\n  const bytes = new Uint8Array(bin.length);\n  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);\n  return bytes;\n}\nfunction rotr(n, x) { return (x >>> n) | (x << (32 - n)); }\nconst SHA_K = new Uint32Array([\n  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,\n  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,\n  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,\n  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,\n  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,\n  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,\n  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,\n  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2\n]);\nfunction sha256Raw(msgBytes) {\n  const l = msgBytes.length;\n  const withLen = new Uint8Array(((l + 9 + 63) >> 6) << 6);\n  withLen.set(msgBytes);\n  withLen[l] = 0x80;\n  const bitLen = l * 8;\n  const dv = new DataView(withLen.buffer);\n  dv.setUint32(withLen.length - 4, bitLen >>> 0, false);\n  dv.setUint32(withLen.length - 8, Math.floor(bitLen / 0x100000000), false);\n  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;\n  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;\n  const w = new Uint32Array(64);\n  for (let off = 0; off < withLen.length; off += 64) {\n    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4, false);\n    for (let i = 16; i < 64; i++) {\n      const s0 = rotr(7, w[i - 15]) ^ rotr(18, w[i - 15]) ^ (w[i - 15] >>> 3);\n      const s1 = rotr(17, w[i - 2]) ^ rotr(19, w[i - 2]) ^ (w[i - 2] >>> 10);\n      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;\n    }\n    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, hh = h7;\n    for (let i = 0; i < 64; i++) {\n      const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);\n      const ch = (e & f) ^ (~e & g);\n      const t1 = (hh + S1 + ch + SHA_K[i] + w[i]) >>> 0;\n      const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);\n      const maj = (a & b) ^ (a & c) ^ (b & c);\n      const t2 = (S0 + maj) >>> 0;\n      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;\n    }\n    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;\n    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + hh) >>> 0;\n  }\n  const out = new Uint8Array(32);\n  const outDv = new DataView(out.buffer);\n  outDv.setUint32(0, h0, false); outDv.setUint32(4, h1, false); outDv.setUint32(8, h2, false); outDv.setUint32(12, h3, false);\n  outDv.setUint32(16, h4, false); outDv.setUint32(20, h5, false); outDv.setUint32(24, h6, false); outDv.setUint32(28, h7, false);\n  return out;\n}\nfunction sha256(data) {\n  return toHex(sha256Raw(toBytes(data)));\n}\nfunction hmacSha256(key, data) {\n  const block = 64;\n  let k = toBytes(key);\n  if (k.length > block) k = sha256Raw(k);\n  if (k.length < block) {\n    const padded = new Uint8Array(block);\n    padded.set(k);\n    k = padded;\n  }\n  const o = new Uint8Array(block);\n  const i = new Uint8Array(block);\n  for (let j = 0; j < block; j++) {\n    o[j] = k[j] ^ 0x5c;\n    i[j] = k[j] ^ 0x36;\n  }\n  const dataBytes = toBytes(data);\n  const inner = new Uint8Array(block + dataBytes.length);\n  inner.set(i);\n  inner.set(dataBytes, block);\n  const outer = new Uint8Array(block + 32);\n  outer.set(o);\n  outer.set(sha256Raw(inner), block);\n  return sha256Raw(outer);\n}\nfunction getSigningKey(dateStamp) {\n  const kDate = hmacSha256('AWS4' + SECRET_KEY, dateStamp);\n  const kRegion = hmacSha256(kDate, REGION);\n  const kService = hmacSha256(kRegion, 's3');\n  return hmacSha256(kService, 'aws4_request');\n}\nfunction encodePath(key) {\n  return key.split('/').map((part) => encodeURIComponent(part)).join('/');\n}\nfunction hostName() {\n  return `${BUCKET}.${ENDPOINT_HOST}`;\n}\nasync function s3Request(method, host, path, headers, body) {\n  const options = {\n    method,\n    url: `https://${host}${path}`,\n    headers: { ...headers, Accept: '*/*' },\n    json: false,\n    encoding: 'text',\n  };\n  const bytes = body && body.length ? toBytes(body) : null;\n  if (bytes) options.body = typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes;\n  try {\n    const res = await this.helpers.httpRequest(options);\n    return typeof res === 'string' ? res : JSON.stringify(res);\n  } catch (err) {\n    const status = err.statusCode || err.response?.statusCode || '';\n    throw new Error(`S3 ${method} ${status}: ${err.message || err}`);\n  }\n}\nfunction signPut(key, body, contentType) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const payloadHash = sha256(body);\n  const headerMap = {\n    'content-type': contentType,\n    host,\n    'x-amz-content-sha256': payloadHash,\n    'x-amz-date': amzDate,\n  };\n  const signedNames = Object.keys(headerMap).sort();\n  const canonicalHeaders = signedNames.map((name) => `${name}:${headerMap[name]}\\n`).join('');\n  const signedHeaders = signedNames.join(';');\n  const canonicalRequest = ['PUT', '/' + encodePath(key), '', canonicalHeaders, signedHeaders, payloadHash].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  const authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;\n  return { host, authorization, amzDate, payloadHash };\n}\nfunction describeS3Error(err) {\n  const status = err.statusCode || err.response?.statusCode || err.httpCode || '';\n  const body = err.response?.body ?? err.response?.data ?? err.cause?.response?.body;\n  if (typeof body === 'string') return `HTTP ${status}: ${body.slice(0, 500)}`;\n  if (body && typeof body === 'object') {\n    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(body)) return `HTTP ${status}: ${body.toString('utf8').slice(0, 500)}`;\n    return `HTTP ${status}: ${JSON.stringify(body).slice(0, 500)}`;\n  }\n  return `HTTP ${status || 'error'}: ${err.message || err}`;\n}\nasync function putObject(key, body, contentType = 'application/octet-stream') {\n  const bytes = toBytes(body);\n  const { host, authorization, amzDate, payloadHash } = signPut(key, bytes, contentType);\n  const path = `/${encodePath(key)}`;\n  try {\n    await this.helpers.httpRequest({\n      method: 'PUT',\n      url: `https://${host}${path}`,\n      headers: {\n        'Content-Type': contentType,\n        'x-amz-content-sha256': payloadHash,\n        'x-amz-date': amzDate,\n        Authorization: authorization,\n      },\n      body: typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes,\n      json: false,\n    });\n  } catch (err) {\n    throw new Error(`S3 PUT ${describeS3Error(err)}`);\n  }\n}\nfunction telegramSafeUrl(url) {\n  return String(url).replace(/_/g, '%5F');\n}\nfunction presignGetUrl(key) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const credential = `${ACCESS_KEY}/${dateStamp}/${REGION}/s3/aws4_request`;\n  const params = {\n    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',\n    'X-Amz-Credential': credential,\n    'X-Amz-Date': amzDate,\n    'X-Amz-Expires': String(EXPIRES),\n    'X-Amz-SignedHeaders': 'host',\n  };\n  const query = Object.keys(params).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');\n  const canonicalRequest = ['GET', '/' + encodePath(key), query, `host:${host}\\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  return telegramSafeUrl(`https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`);\n}\nfunction presignPutUrl(key, contentType) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const credential = `${ACCESS_KEY}/${dateStamp}/${REGION}/s3/aws4_request`;\n  const params = {\n    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',\n    'X-Amz-Credential': credential,\n    'X-Amz-Date': amzDate,\n    'X-Amz-Expires': String(EXPIRES),\n    'X-Amz-SignedHeaders': 'content-type;host',\n  };\n  const query = Object.keys(params).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join('&');\n  const canonicalHeaders = `content-type:${contentType}\\nhost:${host}\\n`;\n  const signedHeaders = 'content-type;host';\n  const canonicalRequest = ['PUT', '/' + encodePath(key), query, canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  return telegramSafeUrl(`https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`);\n}\nfunction signList(prefix) {\n  const now = new Date();\n  const amzDate = now.toISOString().replace(/[:-]|\\.\\d{3}/g, '');\n  const dateStamp = amzDate.slice(0, 8);\n  const host = hostName();\n  const queryParams = { 'list-type': '2', prefix };\n  const canonicalQuery = Object.keys(queryParams).sort().map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(queryParams[k])}`).join('&');\n  const payloadHash = sha256('');\n  const canonicalHeaders = `host:${host}\\nx-amz-content-sha256:${payloadHash}\\nx-amz-date:${amzDate}\\n`;\n  const signedHeaders = 'host;x-amz-content-sha256;x-amz-date';\n  const canonicalRequest = ['GET', '/', canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\\n');\n  const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;\n  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');\n  const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));\n  const authorization = `AWS4-HMAC-SHA256 Credential=${ACCESS_KEY}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;\n  return { host, authorization, amzDate, payloadHash, canonicalQuery };\n}\nasync function listObjects(prefix) {\n  const { host, authorization, amzDate, payloadHash, canonicalQuery } = signList(prefix);\n  const xml = await s3Request.call(this, 'GET', host, `/?${canonicalQuery}`, {\n    'x-amz-content-sha256': payloadHash,\n    'x-amz-date': amzDate,\n    Authorization: authorization,\n  });\n  return [...xml.matchAll(/<Key>([^<]+)<\\/Key>/g)].map((m) => m[1]);\n}\nfunction fileNameToLabel(fileName) {\n  const base = fileName.replace(/\\.[^.]+$/, '');\n  return base.replace(/[-_]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\nfunction isImageKey(key) {\n  return /\\.(jpe?g|png|webp|gif)$/i.test(key);\n}\nconst staticData = $getWorkflowStaticData('global');\nconst chatId = $json.chat_id;\nconst session = staticData.sessions?.[chatId];\nif (!session || session.state !== 'collecting') {\n  return [{ json: { chat_id: chatId, reply_text: 'No active compose session. Send /compose RUN_ID first.' } }];\n}\nif (Date.now() > session.expires_at) {\n  delete staticData.sessions[chatId];\n  throw new Error('Session expired. Send /compose RUN_ID again.');\n}\n\nconst binary = $input.first().binary || {};\nconst binKey = Object.keys(binary)[0];\nif (!binKey) throw new Error('No video binary on message. Enable Download Images/Files on Telegram Trigger.');\n\nconst raw = binary[binKey];\nlet bytes;\nif (typeof raw.data === 'string') bytes = fromBase64(raw.data);\nelse if (raw.data?.type === 'Buffer') bytes = Uint8Array.from(raw.data.data);\nelse throw new Error('Unexpected binary format from Telegram');\n\nconst used = new Set((session.clips || []).map((c) => c.index));\nlet index = $json.caption_index;\nif (!index || index < 1 || index > 5 || used.has(index)) {\n  for (let i = 1; i <= 5; i++) {\n    if (!used.has(i)) { index = i; break; }\n  }\n}\nif (!index) throw new Error('All 5 clip slots are filled. Send done or /cancel.');\n\nconst runId = session.run_id;\nconst s3Key = `reels-clips/${runId}/clip-${String(index).padStart(2, '0')}.mp4`;\nawait putObject.call(this, s3Key, bytes, 'video/mp4');\nconst url = presignGetUrl(s3Key);\n\nsession.clips = (session.clips || []).filter((c) => c.index !== index);\nsession.clips.push({ index, s3_key: s3Key, url, uploaded_at: Date.now() });\nsession.clips.sort((a, b) => a.index - b.index);\nstaticData.sessions[chatId] = session;\n\nreturn [{\n  json: {\n    chat_id: chatId,\n    reply_text: `Clip ${index}/5 saved (${session.clips.length}/5 total). Send more clips or type done.`,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        420
+      ],
+      "id": "d1347497-4451-4cee-b74f-f038a9fade9e",
+      "name": "Handle Clip Upload"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst staticData = $getWorkflowStaticData('global');\nconst chatId = $json.chat_id;\nconst session = staticData.sessions?.[chatId];\n\nif ($json.action === 'cancel') {\n  delete staticData.sessions[chatId];\n  return [{ json: { chat_id: chatId, reply_text: 'Compose session cancelled.' } }];\n}\n\nif (!session) {\n  return [{ json: { chat_id: chatId, reply_text: 'No active session. /compose RUN_ID to start.' } }];\n}\n\nconst clips = session.clips || [];\nconst lines = clips.map((c) => `• Clip ${c.index}: ${c.s3_key}`).join('\\n') || 'No clips yet.';\nreturn [{\n  json: {\n    chat_id: chatId,\n    reply_text: `Session: ${session.run_id}\\nClips: ${clips.length}/5\\n${lines}`,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        660
+      ],
+      "id": "d3e27371-8bce-40e5-a583-793903fb8dfa",
+      "name": "Handle Status Cancel"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst staticData = $getWorkflowStaticData('global');\nconst chatId = $json.chat_id;\nconst session = staticData.sessions?.[chatId];\nif (!session) throw new Error('No active session. /compose RUN_ID first.');\n\nconst clips = session.clips || [];\nif (clips.length < 5) {\n  throw new Error(`Need 5 clips before done. Currently have ${clips.length}/5.`);\n}\n\nconst manifest = session.manifest;\nconst userContent = JSON.stringify({\n  manifest,\n  clips: clips.map((c) => ({ index: c.index, s3_key: c.s3_key, url: c.url })),\n}, null, 2);\n\nconst body = {\n  model: \"anthropic/claude-sonnet-5\",\n  response_format: { type: 'json_object' },\n  messages: [\n    {\n      role: 'system',\n      content: `You are a Shorts post-production director. Given a manifest (script, SRT, sync windows, production bible) and 5 clip URLs, output ONLY valid JSON for an FFmpeg render recipe.\n\nRequired keys: style_name (string), clip_order (array of 1-5), per_clip (array of {index, trim_start, trim_end, speed, zoom}), transitions (array of {after_clip, type, duration_ms}), audio ({voiceover_gain_db, clip_audio_gain_db, fade_in_ms, fade_out_ms}), subtitles ({mode: burn, font, size, color, outline_color}), color ({saturation, contrast, brightness}).\n\nRules:\n- 9:16 vertical Short, premium cinematic look\n- Use subtitles_srt cues only — never invent dialogue\n- trim_end null means use full clip length\n- Prefer xfade transitions 250-400ms\n- Hook energy in clip 1, CTA feel in clip 5`,\n    },\n    { role: 'user', content: userContent },\n  ],\n};\n\nconst res = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://openrouter.ai/api/v1/chat/completions',\n  headers: {\n    Authorization: 'Bearer YOUR_OPENROUTER_KEY',\n    'Content-Type': 'application/json',\n    'HTTP-Referer': 'https://n8n.io',\n    'X-Title': 'Reels Compose Automation',\n  },\n  body,\n  json: true,\n  timeout: 300000,\n});\n\nlet recipe;\nconst content = res?.choices?.[0]?.message?.content || '';\ntry {\n  recipe = JSON.parse(content.replace(/```json\\n?/gi, '').replace(/```\\n?/g, '').trim());\n} catch (e) {\n  throw new Error(`Render director returned invalid JSON: ${String(content).slice(0, 300)}`);\n}\n\nreturn [{\n  json: {\n    chat_id: chatId,\n    run_id: session.run_id,\n    manifest,\n    clips,\n    recipe,\n    reply_text: 'Rendering your reel… I will message you when it is ready (usually 2-5 min).',\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        540
+      ],
+      "id": "db4093db-ba5b-4f96-a028-6f4bded318d7",
+      "name": "OpenRouter Render Director"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst ctx = $input.first().json;\nconst composerUrl = \"https://YOUR-COMPOSER-SERVICE.up.railway.app\";\nif (composerUrl.includes('YOUR-COMPOSER-SERVICE')) {\n  throw new Error('Set COMPOSER_URL in build_compose_workflow.py after deploying reels-composer/ to Railway.');\n}\n\nconst body = {\n  run_id: ctx.run_id,\n  clips: ctx.clips.map((c) => ({ index: c.index, url: c.url, s3_key: c.s3_key })),\n  voiceover_url: ctx.manifest.voiceover_url,\n  subtitles_srt: ctx.manifest.subtitles_srt || ctx.manifest.script?.subtitles_srt || '',\n  recipe: ctx.recipe,\n  output_key: `reels-final/${ctx.run_id}.mp4`,\n};\n\nconst headers = { 'Content-Type': 'application/json' };\nconst token = \"\";\nif (token) headers.Authorization = `Bearer ${token}`;\n\nconst res = await this.helpers.httpRequest({\n  method: 'POST',\n  url: `${composerUrl.replace(/\\/$/, '')}/v1/render`,\n  headers,\n  body,\n  json: true,\n  timeout: 120000,\n});\n\nconst staticData = $getWorkflowStaticData('global');\nconst session = staticData.sessions?.[ctx.chat_id] || {};\nsession.job_id = res.job_id;\nsession.render_status = 'processing';\nstaticData.sessions[ctx.chat_id] = session;\n\nreturn [{ json: { ...ctx, job_id: res.job_id, render_status: res.status } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        540
+      ],
+      "id": "bd60a638-33f7-485c-9b2c-96d294b5dc2b",
+      "name": "Start Render"
+    },
+    {
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        540
+      ],
+      "id": "a3e6e2fe-eb28-41b8-8078-29619ecb0388",
+      "name": "Wait For Render"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst ctx = $input.first().json;\nconst composerUrl = \"https://YOUR-COMPOSER-SERVICE.up.railway.app\";\nconst jobId = ctx.job_id;\nif (!jobId) throw new Error('Missing job_id');\n\nconst headers = {};\nconst token = \"\";\nif (token) headers.Authorization = `Bearer ${token}`;\n\nconst job = await this.helpers.httpRequest({\n  method: 'GET',\n  url: `${composerUrl.replace(/\\/$/, '')}/v1/jobs/${jobId}`,\n  headers,\n  json: true,\n  timeout: 60000,\n});\n\nif (job.status === 'failed') throw new Error(job.error || 'Render failed');\nif (job.status !== 'done') {\n  return [{ json: { ...ctx, poll_again: true, job_status: job.status } }];\n}\n\nconst staticData = $getWorkflowStaticData('global');\ndelete staticData.sessions?.[ctx.chat_id];\n\nreturn [{ json: {\n  ...ctx,\n  poll_again: false,\n  output_url: job.output_url,\n  output_key: job.output_key,\n  duration_sec: job.duration_sec,\n  reply_text: `Your reel is ready!\\nRun: ${ctx.run_id}\\nDuration: ${Math.round(job.duration_sec || 0)}s\\nDownload: ${job.output_url}`,\n} }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        540
+      ],
+      "id": "d686a67d-1143-49d1-85ef-132971bfd392",
+      "name": "Poll Render Job"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b9ec9c52-4727-4fe9-8bf7-5a9eaebe1672",
+              "leftValue": "={{ $json.poll_again }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        540
+      ],
+      "id": "b1c748da-fb32-41df-b774-4a6997a3b765",
+      "name": "IF Poll Again"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        380
+      ],
+      "id": "d82db77c-44b1-4ad8-908f-9d60c15373c9",
+      "name": "Reply Processing",
+      "webhookId": "f5dd25bf-58f4-4329-a450-868bf8d4c363"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2520,
+        620
+      ],
+      "id": "425fe481-c042-4522-a792-d63b9059ac51",
+      "name": "Reply Final",
+      "webhookId": "008da865-7b11-4f09-9807-9f461d580d87"
+    },
+    {
+      "parameters": {
+        "content": "## Reels Compose Automation\n\n**Composer API:** `https://YOUR-COMPOSER-SERVICE.up.railway.app`\n**FFmpeg:** built from official `git.ffmpeg.org/ffmpeg.git` in Docker\n\n### Setup\n1. Railway → New Service → root dir `reels-composer/` (4 vCPU / 4 GB)\n2. Env: `S3_*` creds (same bucket as reels workflow), optional `AUTH_TOKEN`\n3. Set `COMPOSER_URL` in build_compose_workflow.py → run `python3 build_compose_workflow.py`\n4. Import `reels_compose_automation.json` + Telegram credentials\n\n### Usage\n`/compose RUN_ID` → upload 5 clips → `done` → final MP4 link\n\n### Commands\n- `/compose RUN_ID` — start (loads manifest from S3)\n- `done` — render\n- `/status` — progress\n- `/cancel` — abort",
+        "height": 420,
+        "width": 420
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        60
+      ],
+      "id": "34ebd8c5-28d7-4072-a6df-d549bcc253a0",
+      "name": "Setup Notes"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Incoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Incoming": {
+      "main": [
+        [
+          {
+            "node": "IF Compose Start",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Clip Upload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Done",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Status Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Compose Start": {
+      "main": [
+        [
+          {
+            "node": "Handle Compose Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Compose Start": {
+      "main": [
+        [
+          {
+            "node": "Reply Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Clip Upload": {
+      "main": [
+        [
+          {
+            "node": "Handle Clip Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Clip Upload": {
+      "main": [
+        [
+          {
+            "node": "Reply Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Status Cancel": {
+      "main": [
+        [
+          {
+            "node": "Handle Status Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Status Cancel": {
+      "main": [
+        [
+          {
+            "node": "Reply Processing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Done": {
+      "main": [
+        [
+          {
+            "node": "OpenRouter Render Director",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Render Director": {
+      "main": [
+        [
+          {
+            "node": "Start Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Render": {
+      "main": [
+        [
+          {
+            "node": "Reply Processing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait For Render",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait For Render": {
+      "main": [
+        [
+          {
+            "node": "Poll Render Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Render Job": {
+      "main": [
+        [
+          {
+            "node": "IF Poll Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Poll Again": {
+      "main": [
+        [
+          {
+            "node": "Wait For Render",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "f59a6df3-1fdd-4db5-8e63-1eb659f49ab6"
+  }
+}

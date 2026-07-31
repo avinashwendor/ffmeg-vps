@@ -1,0 +1,3345 @@
+{
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "id": "395c084d-ba07-4567-a7f9-2fcc6244fc7c",
+      "name": "When clicking \u2018Execute workflow\u2019"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Status",
+              "lookupValue": "Pending"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        280,
+        400
+      ],
+      "id": "e65d3d8e-8169-45bb-afb9-03f9019999d9",
+      "name": "Fetch the topic"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "perplexity/sonar-pro"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        560,
+        820
+      ],
+      "id": "802e9816-55dd-4922-b92c-3049358b67b9",
+      "name": "OpenRouter Research Model"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"topic_score\": 8,\n  \"is_good_enough\": true,\n  \"score_reason\": \"Strong passive-income angle with rising search volume for vending machines in India and US markets\",\n  \"trending_research_summary\": \"India: smart vending + UPI adoption surging in metros. Dubai: premium office/mall placements growing. US: healthy vending and micro-market trend dominating Shorts.\",\n  \"market_breakdown\": {\n    \"india\": {\"score\": 8, \"key_insight\": \"UPI-enabled smart vending growing 25% YoY in Bangalore and Mumbai\", \"top_angle\": \"Low-investment side hustle for young entrepreneurs\", \"trend_signal\": \"high\"},\n    \"dubai\": {\"score\": 7, \"key_insight\": \"Premium placement in malls and business districts\", \"top_angle\": \"Passive income for expat entrepreneurs\", \"trend_signal\": \"medium\"},\n    \"us\": {\"score\": 9, \"key_insight\": \"Healthy vending and unattended retail booming on YouTube\", \"top_angle\": \"First vending machine income reveal videos\", \"trend_signal\": \"high\"}\n  },\n  \"top_5_alternative_topics\": [\n    {\"rank\": 1, \"topic\": \"I placed a vending machine in a Mumbai office \u2014 here's my monthly income\", \"why_viral\": \"Income reveal + India-specific relatability\", \"trend_signal\": \"high\", \"best_market\": \"India\"},\n    {\"rank\": 2, \"topic\": \"Dubai mall vending machine experiment \u2014 profit in 30 days\", \"why_viral\": \"Luxury market curiosity + fast ROI\", \"trend_signal\": \"high\", \"best_market\": \"Dubai\"},\n    {\"rank\": 3, \"topic\": \"US vending machine passive income \u2014 $500/week breakdown\", \"why_viral\": \"Specific dollar amounts drive clicks\", \"trend_signal\": \"high\", \"best_market\": \"US\"},\n    {\"rank\": 4, \"topic\": \"Smart vending vs traditional \u2014 which wins in 2026\", \"why_viral\": \"Comparison format works across all markets\", \"trend_signal\": \"medium\", \"best_market\": \"Global\"},\n    {\"rank\": 5, \"topic\": \"5 vending machine locations that print money\", \"why_viral\": \"Actionable listicle for entrepreneurs\", \"trend_signal\": \"high\", \"best_market\": \"Global\"}\n  ],\n  \"marketing_video_ideas\": [\n    {\"title\": \"POV: Installing your first vending machine\", \"hook\": \"Day 1 of my vending machine business...\", \"format\": \"POV Story\", \"why_it_works\": \"First-person immersion\", \"target_market\": \"US\"},\n    {\"title\": \"India vending machine income reveal\", \"hook\": \"\u20b945,000/month from ONE machine\", \"format\": \"Income Reveal\", \"why_it_works\": \"Rupee amounts hook Indian audience\", \"target_market\": \"India\"},\n    {\"title\": \"Dubai passive income machine\", \"hook\": \"This mall machine makes more than my salary\", \"format\": \"Luxury B-roll\", \"why_it_works\": \"Aspirational Dubai aesthetic\", \"target_market\": \"Dubai\"},\n    {\"title\": \"Best products for vending machines\", \"hook\": \"These 3 items sell out every week\", \"format\": \"Fast Listicle\", \"why_it_works\": \"Actionable product tips\", \"target_market\": \"Global\"},\n    {\"title\": \"Vending machine mistakes to avoid\", \"hook\": \"I lost \u20b92 lakhs learning this\", \"format\": \"Story + Lesson\", \"why_it_works\": \"Pain-point storytelling\", \"target_market\": \"India\"}\n  ],\n  \"recommendation\": \"proceed\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        800
+      ],
+      "id": "33fd9aaa-ea12-497d-8a79-2b0825e33ff4",
+      "name": "Research Output Parser"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "openai/gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        620
+      ],
+      "id": "d3522cb0-57e9-478e-a48a-06e3c4090e1b",
+      "name": "OpenRouter Synthesis Model"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Conduct DEEP market research on the **VENDING MACHINE industry in INDIA**.\n\n\ud83c\udfaf Proposed Video Topic: {{ $('Fetch the topic').item.json.Topic }}\n\ud83d\udccc Niche: {{ $('Fetch the topic').item.json.Niche }}\n\ud83d\udc64 Persona: {{ $('Fetch the topic').item.json.Persona }}\n\ud83c\udf0d Market: **India** (Mumbai, Delhi, Bangalore, Hyderabad, Pune, Tier-2 cities)\n\nSearch extensively across Indian sources:\n- Google Trends India for \"vending machine business\", \"passive income India\", smart vending\n- Indian news: Economic Times, YourStory, Inc42, Business Standard, Mint\n- Indian blogs, Medium India, LinkedIn India entrepreneur posts\n- X/Twitter India, Instagram Reels India, YouTube India Shorts on vending/passive income\n- Reddit: r/India, r/IndiaInvestments, r/Entrepreneur\n- Quora India discussions on vending machine business\n- FSSAI regulations, UPI payment integration, smart vending startups in India\n- Indian vending machine companies, franchise models, pricing in INR\n\nReturn a detailed India-specific research report (600+ words) with:\n1. Vending machine market size and growth in India (with numbers in INR where possible)\n2. What's trending on Indian YouTube Shorts/Instagram Reels about vending machines RIGHT NOW\n3. Top Indian creators/channels covering vending or passive income\n4. Indian audience pain points and desires (side hustle, \u20b9 income, low investment)\n5. Best locations and product strategies for India (offices, colleges, metro stations, hospitals)\n6. How the proposed topic \"{{ $('Fetch the topic').item.json.Topic }}\" performs for an Indian audience\n7. Regulatory and practical considerations unique to India\n\nCite specific Indian sources, URLs, creator names, and INR figures.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are an India market research specialist with live web search. Focus ONLY on the Indian vending machine and passive income market. Search Indian websites, Indian creators, and India-specific data. Use INR currency. Cite real Indian sources \u2014 Economic Times, YourStory, Indian YouTubers, Indian Instagram accounts. Never give generic global advice when India-specific data exists."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        560,
+        200
+      ],
+      "id": "2eec4367-9efe-465f-8819-357f5ef186b5",
+      "name": "Research India \u2014 Vending"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Conduct DEEP market research on the **VENDING MACHINE industry in DUBAI / UAE**.\n\n\ud83c\udfaf Proposed Video Topic: {{ $('Fetch the topic').item.json.Topic }}\n\ud83d\udccc Niche: {{ $('Fetch the topic').item.json.Niche }}\n\ud83c\udf0d Market: **Dubai, UAE, GCC** (Dubai malls, Abu Dhabi, Sharjah, business districts)\n\nSearch extensively across UAE/Gulf sources:\n- Google Trends UAE for vending machine business, passive income Dubai\n- Gulf news: Gulf News, Khaleej Times, Arabian Business, Zawya\n- Dubai entrepreneur blogs, LinkedIn UAE, Dubai business forums\n- Instagram Reels Dubai, TikTok UAE, YouTube UAE/Dubai content creators\n- X/Twitter UAE business community, expat entrepreneur accounts\n- Dubai Chamber of Commerce, UAE business regulations for vending\n- Premium vending in malls, hotels, airports, free zones\n- Halal product requirements, expat vs local consumer behavior\n- AED pricing, ROI expectations in Dubai market\n\nReturn a detailed Dubai/UAE-specific research report (600+ words) with:\n1. Vending machine market opportunity in Dubai/UAE (AED figures, growth trends)\n2. What's trending on Dubai/UAE social media about vending machines and passive income\n3. Top UAE/Dubai creators and business influencers in this space\n4. Dubai audience psychology \u2014 expat entrepreneurs, luxury positioning, mall culture\n5. Best placement strategies (Dubai Mall area, DIFC, JLT, business bays, airports)\n6. How the proposed topic \"{{ $('Fetch the topic').item.json.Topic }}\" resonates with Dubai/UAE audience\n7. UAE-specific regulations, licensing, and competitive landscape\n\nCite specific UAE sources, URLs, creator names, and AED figures.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a Dubai/UAE market research specialist with live web search. Focus ONLY on the vending machine and passive income market in Dubai and the UAE. Search Gulf news sites, Dubai entrepreneurs, UAE Instagram/YouTube creators. Use AED currency. Cite real UAE-specific sources. Understand expat entrepreneur culture and premium mall/office placement dynamics."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        560,
+        400
+      ],
+      "id": "1baae950-c1a4-4dca-86dc-af66654b416c",
+      "name": "Research Dubai \u2014 Vending"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Conduct DEEP market research on the **VENDING MACHINE industry in the UNITED STATES**.\n\n\ud83c\udfaf Proposed Video Topic: {{ $('Fetch the topic').item.json.Topic }}\n\ud83d\udccc Niche: {{ $('Fetch the topic').item.json.Niche }}\n\ud83d\udc64 Persona: {{ $('Fetch the topic').item.json.Persona }}\n\ud83c\udf0d Market: **United States** (all states, focus on high-density markets)\n\nSearch extensively across US sources:\n- Google Trends US for \"vending machine business\", \"vending machine passive income\", micro markets\n- US news: Forbes, Business Insider, CNBC, Vending Times, Automatic Merchandiser\n- NAMA (National Automatic Merchandising Association) reports and industry data\n- US YouTube: vending machine income channels, passive income creators, side hustle Shorts\n- US TikTok and Instagram Reels on vending machine business\n- Reddit: r/Entrepreneur, r/passive_income, r/sidehustle, r/vending\n- X/Twitter US entrepreneur threads on vending machines\n- US franchise models, healthy vending trends, cashless/card payment tech\n- State-by-state licensing, tax considerations, best US locations\n- Dollar income reveals ($500/week, $2000/month formats that go viral)\n\nReturn a detailed US-specific research report (600+ words) with:\n1. US vending machine industry size, trends, and 2026 outlook (USD figures)\n2. Top performing US YouTube Shorts/TikToks about vending machines (titles, views, channels)\n3. What hooks and formats work for US audience (income reveals, day-in-the-life, ROI breakdowns)\n4. US audience pain points (side hustle, financial freedom, quit 9-5 narrative)\n5. Best US locations and product strategies (offices, gyms, apartments, warehouses)\n6. How the proposed topic \"{{ $('Fetch the topic').item.json.Topic }}\" compares to top US vending content\n7. US competitive landscape, startup costs in USD, and success case studies\n\nCite specific US sources, URLs, channel names, view counts, and USD figures.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a US vending machine industry analyst with live web search. Focus ONLY on the American market \u2014 US YouTube creators, US news, US Reddit, US dollar amounts. The US vending machine passive income niche is huge on YouTube Shorts \u2014 find real channels like vending machine income reveal creators. Cite NAMA data, Vending Times, and real US creator names with view counts."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        560,
+        600
+      ],
+      "id": "c88d2229-47fc-47aa-8eb9-5646fc067923",
+      "name": "Research US \u2014 Vending"
+    },
+    {
+      "parameters": {
+        "jsCode": "const topic = $('Fetch the topic').first().json;\n\nconst extractText = (nodeName) => {\n  try {\n    const item = $(nodeName).first().json;\n    return item.text || item.output || item.response || item.content || JSON.stringify(item);\n  } catch (e) {\n    return '';\n  }\n};\n\nreturn [{\n  json: {\n    topic,\n    india_research: extractText('Research India \u2014 Vending'),\n    dubai_research: extractText('Research Dubai \u2014 Vending'),\n    us_research: extractText('Research US \u2014 Vending')\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        840,
+        400
+      ],
+      "id": "72933368-4936-4aec-be61-2cf03ae90aac",
+      "name": "Aggregate Deep Research"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Synthesize ALL three geographic market research reports on the **VENDING MACHINE industry** and evaluate the proposed video topic.\n\n\ud83c\udfaf PROPOSED TOPIC: {{ $json.topic.Topic }}\n\ud83d\udc64 Persona: {{ $json.topic.Persona }}\n\ud83c\udfad Tone: {{ $json.topic.Tone }}\n\ud83d\udccc Niche: {{ $json.topic.Niche }}\n\ud83d\udce3 CTA Style: {{ $json.topic[\"CTA Style\"] }}\n\n---\n\ud83c\uddee\ud83c\uddf3 INDIA VENDING MACHINE RESEARCH:\n{{ $json.india_research }}\n\n---\n\ud83c\udde6\ud83c\uddea DUBAI / UAE VENDING MACHINE RESEARCH:\n{{ $json.dubai_research }}\n\n---\n\ud83c\uddfa\ud83c\uddf8 US VENDING MACHINE RESEARCH:\n{{ $json.us_research }}\n\n---\n\nBased on ALL three geographic deep research reports above:\n1. Score the proposed topic 1-10 for Shorts viral potential (across all markets)\n2. Set is_good_enough = true only if score >= 7\n3. Write score_reason using evidence from India, Dubai, AND US research\n4. Write trending_research_summary comparing all 3 markets (India vs Dubai vs US)\n5. Provide market_breakdown with score, key_insight, top_angle, trend_signal for each: india, dubai, us\n6. Provide top 5 alternative topics ranked by viral potential \u2014 include best_market (India/Dubai/US/Global)\n7. Provide 5 marketing video ideas with target_market (India/Dubai/US/Global)\n8. Set recommendation to \"proceed\" if score >= 7, else \"consider_switch\"\n\nAll topics and ideas must be relevant to the VENDING MACHINE business space. Use local currency (INR, AED, USD) in examples where appropriate.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a global vending machine industry strategist synthesizing deep market research from India, Dubai/UAE, and the United States. Compare all three markets, identify which market the proposed topic works best for, and produce actionable video topics and marketing ideas for the vending machine passive income niche. Return ONLY structured JSON matching the schema."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1120,
+        400
+      ],
+      "id": "f8a7fab6-0d66-46b9-8346-2038de03db8f",
+      "name": "Deep Research Synthesis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const research = $input.first().json.output;\nconst topic = $('Fetch the topic').first().json;\nconst mb = research.market_breakdown || {};\n\nconst marketLines = [\n  mb.india ? `\ud83c\uddee\ud83c\uddf3 India: ${mb.india.score}/10 \u2014 ${mb.india.key_insight}` : '',\n  mb.dubai ? `\ud83c\udde6\ud83c\uddea Dubai: ${mb.dubai.score}/10 \u2014 ${mb.dubai.key_insight}` : '',\n  mb.us ? `\ud83c\uddfa\ud83c\uddf8 US: ${mb.us.score}/10 \u2014 ${mb.us.key_insight}` : ''\n].filter(Boolean).join('\\n');\n\nconst alts = (research.top_5_alternative_topics || []).map((t, i) =>\n  `${i + 1}. ${t.topic}\\n   \u2192 ${t.why_viral} [${t.trend_signal}] \ud83c\udf0d ${t.best_market || 'Global'}`\n).join('\\n');\n\nconst ideas = (research.marketing_video_ideas || []).map((m, i) =>\n  `${i + 1}. ${m.title}\\n   Hook: \"${m.hook}\"\\n   Format: ${m.format} | ${m.why_it_works} | \ud83c\udf0d ${m.target_market || 'Global'}`\n).join('\\n');\n\nconst weakWarning = research.is_good_enough\n  ? ''\n  : '\u26a0\ufe0f SCORE BELOW 7 \u2014 consider switching to a top alternative below.\\n\\n';\n\nconst approval_message = `\ud83d\udcca VENDING MACHINE MARKET RESEARCH\\n\ud83d\udce1 Deep research: India + Dubai + US (3 parallel searches)\\n\\n\ud83c\udfaf Your Topic: ${topic.Topic}\\n\ud83d\udcc8 Overall Viral Score: ${research.topic_score}/10 ${research.is_good_enough ? '\u2705' : '\u26a0\ufe0f'}\\n\ud83d\udcac Verdict: ${research.score_reason}\\n\\n\ud83c\udf0d MARKET BREAKDOWN:\\n${marketLines}\\n\\n\ud83d\udd25 CROSS-MARKET SUMMARY:\\n${research.trending_research_summary}\\n\\n${weakWarning}\ud83c\udfc6 TOP 5 ALTERNATIVE TOPICS:\\n${alts}\\n\\n\ud83d\udca1 MARKETING VIDEO IDEAS:\\n${ideas}\\n\\n\ud83d\udccc Recommendation: ${research.recommendation === 'proceed' ? '\u2705 Proceed with current topic' : '\ud83d\udd04 Consider switching to a top alternative'}\\n\\n\ud83d\udc47 Approve to start video production?`;\n\nreturn [{ json: { approval_message, ...research } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        400
+      ],
+      "id": "62af8769-5c53-4100-bb82-ef64cab9a5b5",
+      "name": "Format Research Brief"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "7204281266",
+        "message": "={{ $json.approval_message }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        400
+      ],
+      "id": "d7914d1b-c579-4a04-a2fd-db0950ad0388",
+      "name": "Get Topic Approval",
+      "webhookId": "886b3d48-3b76-42a8-85c6-574f52ce0a1c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f1a2b3c4-d5e6-4789-a012-3456789abcde",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1960,
+        400
+      ],
+      "id": "ba2a921b-2bf5-42fa-9643-c82667b1aea9",
+      "name": "Topic Approved?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6a7b8c9-d0e1-4234-f567-89abcdef0123",
+              "name": "Topic",
+              "value": "={{ $('Fetch the topic').item.json.Topic }}",
+              "type": "string"
+            },
+            {
+              "id": "a7b8c9d0-e1f2-4345-a678-9abcdef01234",
+              "name": "Persona",
+              "value": "={{ $('Fetch the topic').item.json.Persona }}",
+              "type": "string"
+            },
+            {
+              "id": "b8c9d0e1-f2a3-4456-b789-abcdef012345",
+              "name": "Tone",
+              "value": "={{ $('Fetch the topic').item.json.Tone }}",
+              "type": "string"
+            },
+            {
+              "id": "c9d0e1f2-a3b4-4567-c890-bcdef0123456",
+              "name": "Niche",
+              "value": "={{ $('Fetch the topic').item.json.Niche }}",
+              "type": "string"
+            },
+            {
+              "id": "d0e1f2a3-b4c5-4678-d901-cdef01234567",
+              "name": "CTA Style",
+              "value": "={{ $('Fetch the topic').item.json[\"CTA Style\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "e1f2a3b4-c5d6-4789-e012-def012345678",
+              "name": "Video Number",
+              "value": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "f2a3b4c5-d6e7-4890-f123-ef0123456789",
+              "name": "research_score",
+              "value": "={{ $('Deep Research Synthesis').item.json.output.topic_score }}",
+              "type": "number"
+            },
+            {
+              "id": "a3b4c5d6-e7f8-4901-a234-f01234567890",
+              "name": "research_summary",
+              "value": "={{ $('Deep Research Synthesis').item.json.output.trending_research_summary }}",
+              "type": "string"
+            },
+            {
+              "id": "b4c5d6e7-f890-4123-b345-012345678901",
+              "name": "score_reason",
+              "value": "={{ $('Deep Research Synthesis').item.json.output.score_reason }}",
+              "type": "string"
+            },
+            {
+              "id": "c5d6e7f8-9012-4234-c456-123456789012",
+              "name": "india_research",
+              "value": "={{ $('Aggregate Deep Research').item.json.india_research }}",
+              "type": "string"
+            },
+            {
+              "id": "d6e7f890-1234-4345-d567-234567890123",
+              "name": "dubai_research",
+              "value": "={{ $('Aggregate Deep Research').item.json.dubai_research }}",
+              "type": "string"
+            },
+            {
+              "id": "e7f89012-3456-4456-e678-345678901234",
+              "name": "us_research",
+              "value": "={{ $('Aggregate Deep Research').item.json.us_research }}",
+              "type": "string"
+            },
+            {
+              "id": "f8901234-5678-4567-f789-456789012345",
+              "name": "market_insights",
+              "value": "={{ JSON.stringify($('Deep Research Synthesis').item.json.output.market_breakdown || {}) }}",
+              "type": "string"
+            },
+            {
+              "id": "90123456-7890-4678-0890-567890123456",
+              "name": "marketing_ideas",
+              "value": "={{ JSON.stringify($('Deep Research Synthesis').item.json.output.marketing_video_ideas || []) }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2240,
+        300
+      ],
+      "id": "741512cc-6791-4040-b688-cb6878d7e034",
+      "name": "Continue to Script"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "mimeType contains 'image/' and (name contains 'logo' or name contains 'brand' or name contains 'vending' or name contains 'machine' or name contains 'kiosk')",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "https://drive.google.com/drive/u/6/folders/1oXcuyH_jNmv62BZhfRcLwIKk6TkPa2VG",
+            "mode": "url"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2520,
+        300
+      ],
+      "id": "83cf7140-2da5-4d93-b196-0e7015fe729e",
+      "name": "Search Brand Assets",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $input.all().map(i => i.json).filter(f =>\n  (f.mimeType && f.mimeType.includes('image')) ||\n  /\\.(png|jpg|jpeg|webp|gif)$/i.test(f.name || '')\n);\n\nconst logo = files.find(f => /logo|brand/i.test(f.name || '')) || files[0];\nconst machines = files.filter(f => /vending|machine|unit|kiosk/i.test(f.name || ''));\nconst machine = machines[0] || files.find(f => f.id && f.id !== logo?.id) || files[1];\n\nreturn [{\n  json: {\n    logo_file_id: logo?.id || '',\n    logo_file_name: logo?.name || 'none',\n    logo_url: logo?.id ? `https://drive.google.com/uc?export=view&id=${logo.id}` : '',\n    machine_file_id: machine?.id || '',\n    machine_file_name: machine?.name || 'none',\n    machine_url: machine?.id ? `https://drive.google.com/uc?export=view&id=${machine.id}` : '',\n    all_brand_assets: files.map(f => f.name).join(', ') || 'none found',\n    brand_asset_count: files.length,\n    has_logo: !!logo?.id,\n    has_machine: !!machine?.id\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        300
+      ],
+      "id": "8d9693dd-b01d-4d86-b6ee-cc372f4053cf",
+      "name": "Prepare Brand Assets",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.logo_file_id }}"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3080,
+        300
+      ],
+      "id": "41b2a6ce-e197-4cac-b78f-8cd03028fe0f",
+      "name": "Download Brand Logo",
+      "executeOnce": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.5-flash",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "text": "You are a brand identity director for a vending machine company. Analyze this brand asset image and extract a production-ready brand kit:\n1. Primary and secondary brand colors (provide hex codes if visible)\n2. Logo style, shape, and safe placement rules for video\n3. Typography and visual personality (premium, tech, approachable, etc.)\n4. Brand do's and don'ts for video content\n5. Mood and color grade for cinematic b-roll\n\nBe specific and actionable \u2014 this guides AI image and video generation.",
+        "inputType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        300
+      ],
+      "id": "17b11c38-1a64-4b78-aa37-cda9320c17de",
+      "name": "Analyze Brand Logo",
+      "executeOnce": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Prepare Brand Assets').item.json.machine_file_id }}"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3640,
+        300
+      ],
+      "id": "8246f8d6-f8ad-4423-a85c-1e5c935ad3ae",
+      "name": "Download Machine Ref",
+      "executeOnce": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.5-flash",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "text": "You are a product cinematographer for vending machines. Analyze this vending machine reference photo and describe for AI video production:\n1. Exact machine body colors, materials, and finish (matte/gloss/metal)\n2. Screen, keypad, or UI panel appearance\n3. Branding decals, logos, and graphics on the machine\n4. Distinctive design features that MUST be preserved in every generated scene\n5. How this specific machine model should appear in premium cinematic POV b-roll\n6. Lighting that best showcases this machine\n\nBe extremely specific \u2014 generated images must match this exact machine look.",
+        "inputType": "binary",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        3920,
+        300
+      ],
+      "id": "9f3d54ae-b9d2-407d-b2f6-595b9f8a996f",
+      "name": "Analyze Machine Ref",
+      "executeOnce": true,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Brand Assets').first().json;\nconst script = $('Continue to Script').first().json;\n\nconst getAnalysis = (nodeName) => {\n  try {\n    const item = $(nodeName).first().json;\n    return item.text || item.output || item.content || item.response || '';\n  } catch (e) {\n    return '';\n  }\n};\n\nconst logoAnalysis = getAnalysis('Analyze Brand Logo') || 'No logo analysis available \u2014 use clean modern vending brand aesthetic.';\nconst machineAnalysis = getAnalysis('Analyze Machine Ref') || 'No machine reference \u2014 use premium modern glass-front vending machine with digital screen.';\n\nconst brand_prompt_anchor = `BRAND IDENTITY \u2014 MUST FOLLOW IN EVERY SCENE:\\nAssets loaded from Google Drive: ${prep.all_brand_assets}\\nLogo file: ${prep.logo_file_name} | Machine ref: ${prep.machine_file_name}\\n\\nLOGO & BRAND GUIDELINES:\\n${logoAnalysis}\\n\\nVENDING MACHINE VISUAL REFERENCE:\\n${machineAnalysis}\\n\\nPRODUCTION RULES: Match exact machine colors and branding from reference. Logo placement must feel natural, never forced. Premium commercial cinematography. On-brand color grade throughout. When vending machines appear in scene, they must look like OUR machines, not generic.`;\n\nconst output = {\n  json: {\n    ...script,\n    ...prep,\n    logo_analysis: logoAnalysis,\n    machine_analysis: machineAnalysis,\n    brand_prompt_anchor,\n    has_machine_ref: false,\n    has_brand_logo: false\n  },\n  binary: {}\n};\n\nconst logoItem = $('Download Brand Logo').first();\nconst machineItem = $('Download Machine Ref').first();\n\nif (logoItem.binary?.data) {\n  output.binary.brand_logo = logoItem.binary.data;\n  output.json.has_brand_logo = true;\n}\nif (machineItem.binary?.data) {\n  output.binary.machine_ref = machineItem.binary.data;\n  output.json.has_machine_ref = true;\n}\n\nreturn [output];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4200,
+        300
+      ],
+      "id": "1b4949be-3b59-49aa-99a7-2068f5de33ec",
+      "name": "Compile Brand Context",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Topic Rejected",
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        2240,
+        560
+      ],
+      "id": "18337418-a29c-4a1c-97db-c97f1ecf39c9",
+      "name": "Mark Topic Rejected"
+    },
+    {
+      "parameters": {
+        "chatId": "7204281266",
+        "text": "=\u274c Topic rejected \u2014 production stopped.\n\n\ud83c\udfaf Topic: {{ $('Fetch the topic').item.json.Topic }}\n\ud83d\udcc8 Score was: {{ $('Deep Research Synthesis').item.json.output.topic_score }}/10\n\nPick a better topic from the top 5 alternatives shared above and update your Google Sheet.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2520,
+        560
+      ],
+      "id": "896716db-cf59-4b01-9bde-e3daae283278",
+      "name": "Notify Topic Rejected",
+      "webhookId": "886b3d48-3b76-42a8-85c6-574f52ce0a1c"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        520
+      ],
+      "id": "2dc45758-ad36-477d-ab3e-619cf3c72aca",
+      "name": "Google Sheets Trigger"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are creating a YouTube Shorts script based on structured input fields AND live market research.\n\n\ud83c\udfaf Topic: {{$json.Topic}}  \n\ud83d\udc64 Target Persona: {{$json.Persona}}  \n\ud83c\udfad Tone: {{$json.Tone}}  \n\ud83d\udccc Niche/Domain: {{$json.Niche}}  \n\ud83d\udce3 CTA Style: {{$json[\"CTA Style\"]}}\n\ud83d\udcc8 Research Score: {{ $json.research_score }}/10 \u2014 {{ $json.score_reason }}\n\ud83d\udd25 Cross-Market Summary: {{ $json.research_summary }}\n\ud83c\udf0d Market Insights: {{ $json.market_insights }}\n\ud83d\udca1 Marketing Angles: {{ $json.marketing_ideas }}\n\n--- LIVE RESEARCH (Perplexity web search) ---\n\ud83c\uddee\ud83c\uddf3 India: {{ $json.india_research }}\n\ud83c\udde6\ud83c\uddea Dubai/UAE: {{ $json.dubai_research }}\n\ud83c\uddfa\ud83c\uddf8 United States: {{ $json.us_research }}\n---\n\n\ud83c\udff7\ufe0f Brand Identity (from our Google Drive assets): {{ $('Compile Brand Context').item.json.brand_prompt_anchor }}\n\nUse the research above to make hooks, captions, and CTA feel timely, specific, and market-aware (use real trends, currencies, and angles from the research \u2014 not generic advice).\n\n\u270d\ufe0f Please write a **highly engaging YouTube Shorts script** in **first-person voice** that follows the best practices of viral short-form content. The video must hook the viewer within the first 3\u20135 seconds, deliver punchy value, and end with a strong CTA or cliffhanger.\n\nYour captions must:\n- Follow a **Problem \u2192 Action \u2192 Reward** structure  \n- Be aligned with the **tone**, **niche**, and **persona**\n- Include **5 captions only** along with **one hook** and **one CTA**\n- Also include the full script as well for the video that will be used for voiceover and highly optimized for Vapi voice synthesis (natural pacing, clear pronunciation) and should not exceed more than 33 seconds at all.\n- Be **wild, bold, and emotionally engaging**, not corporate or overly polished  \n- Use **emojis sparingly** (maximum one per caption, only when impactful)\n\n\ud83c\udfaf Caption Structure:\n1. **Hook (Problem/Curiosity):** Shocking, hilarious, or bold opening line (e.g. something even Andrew Tate would growl)  \n2. **Action (Tip/Lesson):** What to do or what happened  \n3. **Value (Insight/Surprise):** Interesting or unexpected point  \n4. **Interrupt (Emotion/Build):** Personal or emotional angle  \n5. **CTA or Cliffhanger:** Encourage viewer action, matching {{$json[\"CTA Style\"]}}\n\n\ud83d\udcc4 Output Format:\n- `hook`: First 3\u20135 second opening line \u2013 shocking, bold, or funny  \n- `caption_1` \u2192 `caption_5`: Main body lines (tips, story, emotion, etc.)  \n- `cta`: Final call-to-action line aligned with {{$json[\"CTA Style\"]}}\n- Return the Hook, 5 captions and CTA **as plain text only**\n- `full_script`: Full script of the video that will be used for voiceover and highly optimized for Vapi voice synthesis.\n- **Do not** use quotation marks, bullets, asterisks, markdown, or extra formatting  \n- Do **not** add any introductions, explanations, or closing text \u2014 just the raw captions\n- No hashtags, URLs, or handles  \n\n\u26a0\ufe0f Remember:\nWrite for SHORTS. Keep it sharp, fast-paced, raw, and irresistible to scroll past.\n\n\ud83d\udcc4 Output Structure:\nRespond ONLY with a JSON object that exactly follows this structure:\n\n{\n  \"hook\": \"string\",\n  \"caption_1\": \"string\",\n  \"caption_2\": \"string\",\n  \"caption_3\": \"string\",\n  \"caption_4\": \"string\",\n  \"caption_5\": \"string\",\n  \"cta\": \"string\",\n  \"full_script\": \"string\"\n}\n\n\u26a0\ufe0f Do NOT include any extra commentary, markdown formatting, or explanation \u2014 return ONLY the JSON.\n\n\ud83e\uddea Example Output:\n{\n  \"hook\": \"I used to waste 4 hours a day on email \ud83d\ude13\",\n  \"caption_1\": \"Then I built an AI assistant in 10 minutes.\",\n  \"caption_2\": \"Now it reads, replies, and summarizes everything.\",\n  \"caption_3\": \"It even tells me what\u2019s urgent and what\u2019s not.\",\n  \"caption_4\": \"No more inbox stress. Just flow.\",\n  \"caption_5\": \"And yes, it\u2019s 100% free to build.\",\n  \"cta\": \"Want the exact workflow? Type \u2018EMAIL\u2019 below \ud83d\udc47\",\n  \"full_script\": \"I used to waste nearly four hours a day just checking and replying to emails. It was draining. Then one day, I built an AI assistant in under 10 minutes using a free tool. It reads all my emails, summarizes them, and even suggests replies. Now I only spend five minutes on my inbox. It even tells me what's urgent. No more stress, just pure productivity. And the best part? It\u2019s completely free. Want the exact workflow I used? Just type \u2018EMAIL\u2019 in the comments and I\u2019ll share it with you!\"\n}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a professional YouTube Shorts scriptwriter with over 15 years of experience, specialized in crafting highly engaging short-form video scripts across multiple tones, niches, and audience personas. You have reverse-engineered the psychology and pacing of 10,000+ high-performing videos (30s to 3m range).\n\nYou receive LIVE market research from Perplexity web search (India, Dubai, US). Use specific trends, hooks, currencies (INR/AED/USD), and viral angles from that research \u2014 never write generic scripts when research data is provided.\n\n\ud83c\udfaf Your job is to generate one hook, **five concise, scroll-stopping captions (5\u201310 words each)** and a CTA at the end following a **Problem \u2192 Action \u2192 Reward** structure. In addition, generate a full script of the video that will be used as a voiceover for the video and highly optimized for Vapi voice synthesis. The voiceover script should not exceed more than 35 seconds.\n\n\ud83d\udca1 Each of the captions must be standalone, punchy, and templated for video overlay in tools like Creatomate. Write in **first-person voice**, as if the narrator is speaking directly to the viewer.\n\n\u2705 Follow This Caption Structure:\n1. **Hook/Problem:** Shocking, surprising, or funny attention-grabber\n2. **Action:** A relatable tip, command, or lesson\n3. **Value/Insight:** Something unexpected or helpful\n4. **Pattern Interrupt:** Emotional twist or human moment\n5. **Reward/CTA:** A cliffhanger, win, or reason to watch more\n\n\ud83e\udde0 Match tone, pacing, and vocabulary to the assigned **Persona**, **Tone**, and **Niche**.\n\n\ud83d\udeab No fluff. No long sentences. Emojis: max 1 per caption, only when useful.\n\n---\n\n\ud83e\uddf1 Core Traits of a High-Converting YouTube Shorts Script:\n1. \ud83d\udd11 **Strong Hook:** Instantly grabs attention within 3\u20135 seconds.\n2. \ud83d\udd25 **Emotional Triggers:** Use fear, urgency, desire, curiosity, excitement.\n3. \ud83e\udde0 **Pattern Interrupts:** Rhetorical shifts, humor, or punchy pivots.\n4. \ud83d\udd17 **Seamless Transitions:** Logical, natural progression.\n5. \ud83d\udeaa **Cliffhangers:** Tease next idea or leave them curious.\n6. \ud83d\udce3 **Smooth CTA:** Relevant call to action or next step.\n7. \ud83d\udc41\ufe0f\u200d\ud83d\udde8\ufe0f **Perspective:** Always written in first-person.\n\nYour output should be platform-native, persona-aligned, retention-optimized, and ready to plug into automation pipelines."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        4480,
+        300
+      ],
+      "id": "fce19f1a-81ea-4306-8dc9-3f047dcf968f",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "openai/gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        4480,
+        700
+      ],
+      "id": "7fe80a41-beab-4a50-bc0c-8f332589401f",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"hook\": \"I used to waste 4 hours a day on email \ud83d\ude13\",\n  \"caption_1\": \"Then I built an AI assistant in 10 minutes.\",\n  \"caption_2\": \"Now it reads, replies, and summarizes everything.\",\n  \"caption_3\": \"It even tells me what\u2019s urgent and what\u2019s not.\",\n  \"caption_4\": \"No more inbox stress. Just flow.\",\n  \"caption_5\": \"And yes, it\u2019s 100% free to build.\",\n  \"cta\": \"Want the exact workflow? Type \u2018EMAIL\u2019 below \ud83d\udc47\",\n  \"full_script\": \"I used to waste nearly four hours a day just checking and replying to emails. It was draining. Then one day, I built an AI assistant in under 10 minutes using a free tool. It reads all my emails, summarizes them, and even suggests replies. Now I only spend five minutes on my inbox. It even tells me what's urgent. No more stress, just pure productivity. And the best part? It\u2019s completely free. Want the exact workflow I used? Just type \u2018EMAIL\u2019 in the comments and I\u2019ll share it with you!\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        4480,
+        520
+      ],
+      "id": "f364155b-5876-4f0f-8aa0-26ce39d5bffd",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "output",
+        "options": {
+          "destinationFieldName": "image_caption"
+        }
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        4760,
+        300
+      ],
+      "id": "edcce8ed-8881-4918-a56f-6e5c0cc8b5dd",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Create an **image prompt** AND a **motion prompt** for this YouTube Shorts scene.\n\n\ud83c\udfaf Topic: {{ $('Fetch the topic').item.json.Topic }}\n\ud83d\udce3 Persona: {{ $('Fetch the topic').item.json.Persona }}\n\ud83c\udfad Niche: {{ $('Fetch the topic').item.json.Niche }}\n\ud83c\udfa8 Tone: {{ $('Fetch the topic').item.json.Tone }}\n\ud83d\udcc8 Research Score: {{ $('Compile Brand Context').item.json.research_score }}/10\n\ud83d\udd25 Market Trends: {{ $('Compile Brand Context').item.json.research_summary }}\n\ud83c\udf0d Market Insights: {{ $('Compile Brand Context').item.json.market_insights }}\n\ud83c\udff7\ufe0f Brand Kit: {{ $('Compile Brand Context').item.json.brand_prompt_anchor }}\n\ud83c\udfac Scene Index: {{ $itemIndex }} (0=Hook, 1-5=Story beats, 6=CTA)\n\ud83e\udde0 Scene Text (PRIMARY DIRECTIVE \u2014 image must visually depict this): {{ $json.image_caption }}\n\nReflect current vending-machine trends from the research in visual mood, setting, and props (India UPI/smart vending, Dubai premium mall aesthetic, US income-reveal energy \u2014 pick what fits this scene).\n\nReturn JSON with two fields:\n1. **image_prompt** \u2014 static first-frame description (photorealistic, premium, 9:16)\n2. **motion_prompt** \u2014 Wan 2.6 video motion direction using timestamped shots for a 5-second clip\n\n**image_prompt** format:\nFirst-person POV shot [foreground action with tactile realism]\nIn the background, [premium environment, lighting, mood]\n\n**motion_prompt** format (REQUIRED \u2014 this makes the video sexy):\nPremium cinematic commercial b-roll continuing from first frame. Photoreal, luxurious, hypnotic, no subtitles.\nShot 1 [0-2s] [camera move + lighting change + emotional beat]\nShot 2 [2-5s] [different camera move + parallax + mood payoff]\n\nCustomize motion by scene role:\n- **Hook (0):** aggressive dolly push-in, snap energy, high contrast, scroll-stopping punch\n- **Story (1-5):** rotate styles \u2014 orbit, lateral track, rack focus, crane rise, handheld drift (never repeat same move twice in a row)\n- **CTA (6):** slow pull-back reveal, confident hero hold, empowering glow\n\nCustomize by niche:\n- Self-improvement \u2192 warm gold, sunrise, calm power, aspirational\n- Fitness \u2192 dynamic tracking, sweat glints, high contrast, raw energy\n- Tech \u2192 cool blue sleek dolly, screen reflections, precision\n- Finance/Business \u2192 luxury dark mood, city bokeh, authority\n- Lifestyle \u2192 soft dreamy lens flares, editorial beauty\n\nEnd image_prompt with: shot on ARRI Alexa Mini, 35mm anamorphic, subtle film grain, shallow DOF, premium editorial color grade, 9:16 vertical, no AI look, no text, no logos.",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are a world-class cinematographer who directs viral YouTube Shorts and luxury brand films. You output TWO prompts per scene: a static **image_prompt** (for Gemini) and a dynamic **motion_prompt** (for Wan 2.6 video AI).\n\nYou receive live market research \u2014 reflect trending vending-machine aesthetics and regional market energy in every scene (India smart/UPI, Dubai premium mall, US income-reveal hustle culture where relevant).\n\n\ud83c\udfaf Persona: {{ $('Fetch the topic').item.json.Persona }}\n\ud83d\udd0d Niche: {{ $('Fetch the topic').item.json.Niche }}\n\ud83c\udfa8 Tone: {{ $('Fetch the topic').item.json.Tone }}\n\ud83c\udff7\ufe0f Brand Kit: {{ $('Compile Brand Context').item.json.brand_prompt_anchor }}\n\nYour visuals must feel **insanely premium** \u2014 like a $50K commercial shoot, NOT AI slop. Think Apple, Nike, Rolex, high-end travel creators.\n\n**image_prompt rules:**\n- First-person POV with cinema camera feel (NOT amateur GoPro)\n- Tactile realism: skin texture, fabric weave, dust in light, imperfect reflections\n- Premium materials: marble, leather, brushed metal, glass\n- One subtle imperfection to kill the AI look\n- Match Tone + Niche color mood\n\n**motion_prompt rules (THIS IS WHAT MAKES VIDEO SEXY):**\n- Use Wan 2.6 timestamp format: Shot 1 [0-2s] ... Shot 2 [2-5s] ...\n- Each scene gets a UNIQUE camera move \u2014 never generic \"slow zoom\"\n- Camera vocabulary: dolly push/pull, orbit arc, lateral track, crane rise, rack focus, dutch tilt settle, parallax glide, gimbal drift\n- Add lighting evolution within the 5s (rim light blooms, shadows shift, bokeh pulses)\n- Hook scenes = maximum scroll-stopping energy. CTA = slow confident reveal.\n- Adapt intensity to Tone (bold/aggressive vs calm/intimate)\n- Always start with: \"Premium cinematic commercial b-roll continuing from first frame. Photoreal, luxurious, hypnotic pacing, no subtitles.\"\n\n\u26a0\ufe0f NEVER: plastic skin, CGI look, cartoon motion, jelly warping, static frames, generic AI movement.\n\nAppend to image_prompt: shot on ARRI Alexa Mini, 35mm anamorphic, subtle film grain, shallow DOF, premium editorial color grade, 9:16 vertical, no AI look, no text, no logos"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        5320,
+        200
+      ],
+      "id": "d8073c49-ad31-4902-b13d-3de4cbf969cf",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3c6b532c-e85a-4428-aa04-2f79889e6389",
+              "leftValue": "={{ $json.image_caption.length }}",
+              "rightValue": 100,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        5040,
+        300
+      ],
+      "id": "2e2d7325-02d8-48a5-9a62-61b5877ae0a2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "name": "=scene-{{ $('Fetch the topic').item.json.Topic.replaceAll(\" \",\"_\").replaceAll(\"#\",\"\") }}-{{ $itemIndex }}.png",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "https://drive.google.com/drive/u/6/folders/1oXcuyH_jNmv62BZhfRcLwIKk6TkPa2VG",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "id": "998b24e2-95e7-4e31-8347-a1e5453047ae",
+      "name": "Upload Scene Image",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        6720,
+        300
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone",
+            "allowFileDiscovery": true
+          }
+        },
+        "options": {}
+      },
+      "id": "be84235e-44c3-4796-880f-99701e2a38d4",
+      "name": "Set Image Public",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        7000,
+        300
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "name": "image_url",
+              "value": "=https://drive.google.com/uc?export=view&id={{ $('Upload Scene Image').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+              "name": "image_prompt",
+              "value": "={{ $('Loop Over Items').item.json.output.image_prompt }}",
+              "type": "string"
+            },
+            {
+              "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+              "name": "motion_prompt",
+              "value": "={{ $('Loop Over Items').item.json.output.motion_prompt }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2cad6423-a69d-4309-aa9a-a95899f23ea9",
+      "name": "Set Image URL",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        7280,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n    \"image_prompt\": \"First-person POV shot of hands resting on a matte-black leather journal, fingers slowly turning a cream paper page, a fountain pen catching warm rim light\\nIn the background, a floor-to-ceiling window reveals a blurred city skyline at golden hour, soft amber light washing across a walnut desk, a single espresso cup with faint steam rising, shallow bokeh from pendant lights, mood is quiet ambition and controlled power, shot on ARRI Alexa Mini, 35mm anamorphic, subtle film grain, shallow DOF, premium editorial color grade, 9:16 vertical, no AI look, no text, no logos\",\n    \"motion_prompt\": \"Premium cinematic commercial b-roll continuing from first frame. Photoreal, luxurious, hypnotic pacing, no subtitles.\\nShot 1 [0-2s] Slow dolly push-in with rack focus shifting from background skyline to journal page, golden rim light intensifies across knuckles, aspirational energy builds.\\nShot 2 [2-5s] Gentle parallax glide right, steam from espresso curls into backlight, background bokeh city lights pulse softly, natural gimbal micro-drift, mood is calm unstoppable power.\"\n  }"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        5320,
+        400
+      ],
+      "id": "0046e2ce-c1d4-43f8-a493-6b8ddc75eb87",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "edit",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.5-flash-image",
+          "cachedResultName": "models/gemini-2.5-flash-image"
+        },
+        "prompt": "={{ $json.image_generation_prompt }}",
+        "images": {
+          "values": [
+            {
+              "binaryPropertyName": "machine_ref"
+            }
+          ]
+        },
+        "options": {
+          "binaryPropertyOutput": "data"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        6440,
+        200
+      ],
+      "id": "66839005-c5d6-4634-b19a-e8e4c4f62e0e",
+      "name": "Generate Scene Image",
+      "executeOnce": false
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        8680,
+        200
+      ],
+      "id": "b2d39904-6b8d-4bec-918b-6c203dd67287",
+      "name": "Stop and Error"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://queue.fal.run/fal-ai/wan/v2.6/image-to-video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"prompt\": \"{{ $json.motion_prompt }}\",\n  \"image_url\": \"{{ $json.image_url }}\",\n  \"duration\": \"5\",\n  \"resolution\": \"720p\",\n  \"enable_prompt_expansion\": true,\n  \"negative_prompt\": \"AI generated, CGI, synthetic, plastic skin, waxy texture, oversaturated, overprocessed, uncanny valley, morphing, warping, jelly motion, floating objects, distorted anatomy, extra fingers, blurry, low quality, watermark, text overlay, static frame, frozen, glitch, cartoon, illustration, 3d render, stock photo look, unnatural lighting, plastic hair, amateur, cheap, generic\"\n}",
+        "options": {}
+      },
+      "id": "6d253c32-0999-4498-b30d-9eb55081b73b",
+      "name": "Image-to-Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        7560,
+        300
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "url": "=https://queue.fal.run/fal-ai/wan/requests/{{ $('Image-to-Video').item.json.request_id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "d8997958-f8ea-495c-b7be-8355a2c5a4d3",
+      "name": "Poll Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        8120,
+        300
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "amount": 30
+      },
+      "id": "8436a37a-d19b-4cfd-955e-b872f8e36dc1",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        7840,
+        300
+      ],
+      "webhookId": "1f9d716f-6544-4e4e-94ec-408ac3ea6e82",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "a920eb54-fc23-4b68-8f56-2eee907a5481",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "FAILED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d95793c9-1c65-4baf-820e-777f140e366a",
+      "name": "Video Failed?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        8400,
+        200
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "b020fb65-gd34-5c79-9g67-3fff018b6592",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "COMPLETED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ff303133-e401-45ef-b1e3-e295543c2af0",
+      "name": "Video Ready?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        8400,
+        400
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.response_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "d8322310-c4b5-4329-8c85-614b2b4e5260",
+      "name": "Fetch Video Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        8680,
+        400
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        5600,
+        300
+      ],
+      "id": "8e105bc3-0e6e-470c-a89e-8dee98da3524",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        5880,
+        600
+      ],
+      "id": "abb59d00-4132-4cc7-8928-eeffddc668ed",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.cartesia.ai/tts/bytes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Cartesia-Version",
+              "value": "2024-11-13"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model_id\": \"sonic-3.5\",\n  \"transcript\": \"{{ $json.image_caption }}\",\n  \"voice\": {\n    \"mode\": \"id\",\n    \"id\": \"YOUR_VAPI_VOICE_ID\"\n  },\n  \"output_format\": {\n    \"container\": \"mp3\",\n    \"sample_rate\": 44100\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "2deee285-1511-4075-853a-c4ccc33157b5",
+      "name": "Generate voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        5320,
+        700
+      ],
+      "retryOnFail": false,
+      "typeVersion": 4.2,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "writer",
+            "type": "anyone",
+            "allowFileDiscovery": true
+          }
+        },
+        "options": {}
+      },
+      "id": "f1bf81bc-d21f-49b4-b05a-6d1ea8cf76c9",
+      "name": "Set Access Permissions",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        5880,
+        820
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Fetch the topic').item.json.Topic.replaceAll(\" \",\"_\").replaceAll(\"#\",\"\") }}-vo.mp3",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "https://drive.google.com/drive/u/6/folders/1oXcuyH_jNmv62BZhfRcLwIKk6TkPa2VG",
+          "mode": "url"
+        },
+        "options": {}
+      },
+      "id": "1ce5f002-27ab-4d35-b08c-38a4122ce30c",
+      "name": "Upload VoiceOver",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        5600,
+        820
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {},
+      "id": "a1030f29-4868-49bc-836c-ceb5b0dd5517",
+      "name": "Pair Videos with Audio",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        6440,
+        600
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "name": "=Short-{{ $('Generate-Video-Creatomate').item.json.id }}.mp4",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1RIxbd_ImdIr1tKZj35P4xMZfX0tujvs7",
+          "mode": "list",
+          "cachedResultName": "YT-Faceless-Channel",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1RIxbd_ImdIr1tKZj35P4xMZfX0tujvs7"
+        },
+        "options": {}
+      },
+      "id": "8e422fd6-bd30-45c9-b352-04208a3d2839",
+      "name": "Upload Final Video",
+      "type": "n8n-nodes-base.googleDrive",
+      "position": [
+        8120,
+        500
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.creatomate.com/v1/renders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer db5c86c5717a4448b24810aae2e5c1733e484e04f21f3f728bcf8c4079ed4f84ba22ee6cb3594ce470840438b7d9b50a"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"template_id\": \"f0bb69cb-a2c9-4171-a467-71c4118582df\",\n  \"modifications\": {\n    \"Audio-1.source\": \"{{ $json.data[7].voiceover_url}}\",\n    \"Video_Hook.source\": \"{{ $json.data[0].video_clip_url }}\",\n    \"Video-1.source\": \"{{$json.data[1].video_clip_url }}\",\n    \"Video-2.source\": \"{{ $json.data[2].video_clip_url }}\",\n    \"Video-3.source\": \"{{$json.data[3].video_clip_url }}\",\n    \"Video-4.source\": \"{{ $json.data[4].video_clip_url }}\",\n    \"Video-5.source\": \"{{ $json.data[5].video_clip_url }}\",\n    \"Video_CTA.source\": \"{{$json.data[6].video_clip_url }}\",\n    \"Text_Hook.text\": \"{{ $json.data[0].image_caption }}\",\n    \"Text-1.text\": \"{{ $json.data[1].image_caption }}\",\n    \"Text-2.text\": \"{{ $json.data[2].image_caption }}\",\n    \"Text-3.text\": \"{{ $json.data[3].image_caption }}\",\n    \"Text-4.text\": \"{{ $json.data[4].image_caption }}\",\n    \"Text-5.text\": \"{{ $json.data[5].image_caption }}\",\n    \"Text_CTA.text\": \"{{ $json.data[6].image_caption }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7000,
+        600
+      ],
+      "id": "cb6b651a-ce52-45ed-a359-7352d0f1b7fd",
+      "name": "Generate-Video-Creatomate"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Done",
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+            "Video_URL": "={{ $('Upload Final Video').item.json.webContentLink }}"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tone",
+              "displayName": "Tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Language",
+              "displayName": "Language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "CTA Style",
+              "displayName": "CTA Style",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Youtube Status",
+              "displayName": "Youtube Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Instagram Status",
+              "displayName": "Instagram Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Video_URL",
+              "displayName": "Video_URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        8400,
+        500
+      ],
+      "id": "bd5e7de0-3a48-4a69-ad44-beccb44cacdb",
+      "name": "Google Sheets"
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "minutes"
+      },
+      "id": "ce069eef-b7f6-4bf1-80ee-c37580848edc",
+      "name": "Wait1",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        7280,
+        600
+      ],
+      "webhookId": "206d0cdf-b71f-44a7-909f-97df885c471a",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "amount": 2
+      },
+      "id": "6688c7de-bddd-437a-97c5-751154eccef2",
+      "name": "Wait 2 Second1",
+      "type": "n8n-nodes-base.wait",
+      "position": [
+        8680,
+        300
+      ],
+      "webhookId": "c40b180e-016c-4648-898a-5942b8a9b00d",
+      "typeVersion": 1.1
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "17841400920241720",
+        "edge": "media_publish",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "creation_id",
+                "value": "={{ $('Post Video to Instagram Container').item.json.id }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "5d808bf5-a085-47f7-9f9d-46d070fcfe0c",
+      "name": "Publish Image Container to Instagram",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "position": [
+        8960,
+        300
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "17841400920241720",
+        "edge": "media",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "video_url",
+                "value": "={{ $('fetch_final_video_url').item.json.url }}"
+              },
+              {
+                "name": "media_type",
+                "value": "REELS"
+              },
+              {
+                "name": "caption",
+                "value": "=Testing reels"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1ebd4aaa-f8c6-4cb7-8bea-ffd4b875b8fd",
+      "name": "Post Video to Instagram Container",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "position": [
+        8400,
+        300
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2c788663-8fbb-4ff9-8248-51d3cd8f90f9",
+              "name": "video_clip_url",
+              "value": "={{ $json.video.url }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5600,
+        600
+      ],
+      "id": "335608df-2080-4c5a-b954-ce7a08d85bb9",
+      "name": "Extract_Video_URLs"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "542bf8f4-210d-467b-bb4b-39a82081ac44",
+              "name": "voiceover_url",
+              "value": "={{ $('Upload VoiceOver').item.json.webContentLink }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6160,
+        820
+      ],
+      "id": "ce7c8285-bdf2-4244-8583-75521218784b",
+      "name": "Extract_Voiceover_URL"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        6720,
+        600
+      ],
+      "id": "7b135471-af21-4e27-a29b-0294b4317982",
+      "name": "Aggregate"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.creatomate.com/v1/renders/{{ $('Generate-Video-Creatomate').item.json.id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer db5c86c5717a4448b24810aae2e5c1733e484e04f21f3f728bcf8c4079ed4f84ba22ee6cb3594ce470840438b7d9b50a"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2cc06ea7-ab18-4ed9-a76d-ea7ba47c6bbe",
+      "name": "fetch_final_video_url",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        7560,
+        600
+      ],
+      "executeOnce": true,
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "48645c4d-bb12-4d0a-9673-f5abe2eff908",
+      "name": "download final video",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        7840,
+        500
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "chatId": "7204281266",
+        "text": "=A new reel/shorts video has been created: {{ $('Upload Final Video').item.json.webContentLink }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        8680,
+        500
+      ],
+      "id": "6cd94bd6-aa04-4ef9-9efc-26f0fdc17380",
+      "name": "Notify me",
+      "webhookId": "886b3d48-3b76-42a8-85c6-574f52ce0a1c"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "7204281266",
+        "message": "=Would you like to post this generated video on your Instagram account?\n\n{{ $('fetch_final_video_url').item.json.url }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        7840,
+        300
+      ],
+      "id": "db3b0ab4-5dfb-4de5-9aa0-8984314bfbf6",
+      "name": "Get approval to post",
+      "webhookId": "886b3d48-3b76-42a8-85c6-574f52ce0a1c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "66a5be07-b68f-49cc-866d-2e32e42e74fb",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8120,
+        300
+      ],
+      "id": "6b9030af-8fc6-4346-a7d0-6c8fcfa666ee",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+            "Instagram Status": "Rejected"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tone",
+              "displayName": "Tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Language",
+              "displayName": "Language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "CTA Style",
+              "displayName": "CTA Style",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Youtube Status",
+              "displayName": "Youtube Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Instagram Status",
+              "displayName": "Instagram Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Video_URL",
+              "displayName": "Video_URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        8120,
+        120
+      ],
+      "id": "df4c3d7b-d1df-496e-ad9a-f906d2151ff2",
+      "name": "Google Sheets1"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+            "Instagram Status": "Published"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tone",
+              "displayName": "Tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Language",
+              "displayName": "Language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "CTA Style",
+              "displayName": "CTA Style",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Youtube Status",
+              "displayName": "Youtube Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Instagram Status",
+              "displayName": "Instagram Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Video_URL",
+              "displayName": "Video_URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        9240,
+        300
+      ],
+      "id": "2b849147-a9c6-479c-b632-c452a4b724da",
+      "name": "Google Sheets2"
+    },
+    {
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Fetch the topic').item.json.Topic }}",
+        "regionCode": "US",
+        "categoryId": "42",
+        "options": {
+          "defaultLanguage": "en-US",
+          "privacyStatus": "private"
+        }
+      },
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        8400,
+        720
+      ],
+      "id": "ccefd750-7eb0-425e-9546-d37209c9689b",
+      "name": "YouTube"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "chatId": "7204281266",
+        "message": "=Would you like to post this generated video on your YouTube account?\n\n{{ $('fetch_final_video_url').item.json.url }}",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        7840,
+        720
+      ],
+      "id": "52be8215-6634-4a2e-8c7f-256228d45f29",
+      "name": "Get approval to post1",
+      "webhookId": "886b3d48-3b76-42a8-85c6-574f52ce0a1c"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "66a5be07-b68f-49cc-866d-2e32e42e74fb",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        8120,
+        720
+      ],
+      "id": "ba260797-419c-44c2-95dd-97b1139df70d",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+            "Youtube Status": "Rejected"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tone",
+              "displayName": "Tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Language",
+              "displayName": "Language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "CTA Style",
+              "displayName": "CTA Style",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Youtube Status",
+              "displayName": "Youtube Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Instagram Status",
+              "displayName": "Instagram Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Video_URL",
+              "displayName": "Video_URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        8400,
+        900
+      ],
+      "id": "a7474677-3638-4477-8d64-047b8a2d7b29",
+      "name": "Google Sheets3"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A",
+          "mode": "list",
+          "cachedResultName": "AI Content Generation",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1978643871,
+          "mode": "list",
+          "cachedResultName": "Faceless YT Shorts",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1uxoDVNVPD4XXlXtjrmrTxNgSuFqWqUa5WY0nL7P5I1A/edit#gid=1978643871"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video Number": "={{ $('Fetch the topic').item.json[\"Video Number\"] }}",
+            "Youtube Status": "Published"
+          },
+          "matchingColumns": [
+            "Video Number"
+          ],
+          "schema": [
+            {
+              "id": "Video Number",
+              "displayName": "Video Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Tone",
+              "displayName": "Tone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Niche",
+              "displayName": "Niche",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Persona",
+              "displayName": "Persona",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Platform",
+              "displayName": "Platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Language",
+              "displayName": "Language",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "CTA Style",
+              "displayName": "CTA Style",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Youtube Status",
+              "displayName": "Youtube Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Instagram Status",
+              "displayName": "Instagram Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Video_URL",
+              "displayName": "Video_URL",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.6,
+      "position": [
+        8680,
+        720
+      ],
+      "id": "43e5d4f7-2b86-418d-b77c-d0d044c5222a",
+      "name": "Google Sheets4"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst brandContext = $('Compile Brand Context').first();\nconst topic = $('Fetch the topic').first().json;\nconst loopItem = $('Loop Over Items').item.json;\n\nconst sceneCaption = loopItem.image_caption || item.json.image_caption || '';\nconst sceneIndex = $('Loop Over Items').itemIndex;\nconst roles = ['hook', 'caption_1', 'caption_2', 'caption_3', 'caption_4', 'caption_5', 'cta'];\nconst role = roles[sceneIndex] ?? `scene_${sceneIndex}`;\nconst imagePrompt = item.json.output?.image_prompt || '';\nconst motionPrompt = item.json.output?.motion_prompt || '';\n\nconst binary = {};\nif (brandContext.binary?.machine_ref) binary.machine_ref = brandContext.binary.machine_ref;\nif (brandContext.binary?.brand_logo) binary.brand_logo = brandContext.binary.brand_logo;\n\nconst imageGenerationPrompt = [\n  'Create a photorealistic 9:16 YouTube Shorts first frame.',\n  `TOPIC: ${topic.Topic}`,\n  `NICHE: ${topic.Niche}`,\n  `SCENE TEXT (must be visually represented): \"${sceneCaption}\"`,\n  `SCENE ROLE: ${role}`,\n  `VISUAL DIRECTION: ${imagePrompt}`,\n  brandContext.json.brand_prompt_anchor,\n  'Reference image 1 (if provided) = exact vending machine model to feature. Reference image 2 (if provided) = brand logo for styling.',\n  'The scene must clearly relate to the caption, topic, and vending-machine business context.',\n  'shot on ARRI Alexa Mini, 35mm anamorphic, subtle film grain, shallow DOF, premium editorial color grade, 9:16 vertical, no text overlays, no watermarks, no AI artifacts'\n].join('\\n\\n');\n\nreturn [{\n  json: {\n    ...item.json,\n    scene_caption: sceneCaption,\n    scene_role: role,\n    scene_index: sceneIndex,\n    image_generation_prompt: imageGenerationPrompt,\n    motion_prompt: motionPrompt,\n    has_machine_ref: !!binary.machine_ref,\n    has_brand_logo: !!binary.brand_logo\n  },\n  binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5880,
+        300
+      ],
+      "id": "a1c2d3e4-f5a6-4789-b012-3456789abcde",
+      "name": "Prepare Scene Image Input"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b2c3d4e5-f6a7-4890-b123-456789abcdef",
+              "leftValue": "={{ $json.has_machine_ref }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        6160,
+        300
+      ],
+      "id": "b2c3d4e5-f6a7-4890-b123-456789abcdef",
+      "name": "Has Machine Reference?"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.5-flash-image",
+          "cachedResultName": "models/gemini-2.5-flash-image"
+        },
+        "prompt": "={{ $json.image_generation_prompt }}",
+        "options": {
+          "binaryPropertyOutput": "data"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        6440,
+        480
+      ],
+      "id": "c3d4e5f6-a7b8-4901-cdef-123456789012",
+      "name": "Generate Scene Image (Text Only)",
+      "executeOnce": false
+    }
+  ],
+  "connections": {
+    "When clicking \u2018Execute workflow\u2019": {
+      "main": [
+        [
+          {
+            "node": "Fetch the topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch the topic": {
+      "main": [
+        [
+          {
+            "node": "Research India \u2014 Vending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Research Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Research India \u2014 Vending",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Research Dubai \u2014 Vending",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Research US \u2014 Vending",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Deep Research Synthesis",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Synthesis Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Deep Research Synthesis",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research India \u2014 Vending": {
+      "main": [
+        [
+          {
+            "node": "Research Dubai \u2014 Vending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research Dubai \u2014 Vending": {
+      "main": [
+        [
+          {
+            "node": "Research US \u2014 Vending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Research US \u2014 Vending": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Deep Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Deep Research": {
+      "main": [
+        [
+          {
+            "node": "Deep Research Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deep Research Synthesis": {
+      "main": [
+        [
+          {
+            "node": "Format Research Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Research Brief": {
+      "main": [
+        [
+          {
+            "node": "Get Topic Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Topic Approval": {
+      "main": [
+        [
+          {
+            "node": "Topic Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Topic Approved?": {
+      "main": [
+        [
+          {
+            "node": "Continue to Script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Topic Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue to Script": {
+      "main": [
+        [
+          {
+            "node": "Search Brand Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Brand Assets": {
+      "main": [
+        [
+          {
+            "node": "Prepare Brand Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Brand Assets": {
+      "main": [
+        [
+          {
+            "node": "Download Brand Logo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Brand Logo": {
+      "main": [
+        [
+          {
+            "node": "Analyze Brand Logo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Brand Logo": {
+      "main": [
+        [
+          {
+            "node": "Download Machine Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Machine Ref": {
+      "main": [
+        [
+          {
+            "node": "Analyze Machine Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Machine Ref": {
+      "main": [
+        [
+          {
+            "node": "Compile Brand Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Brand Context": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Topic Rejected": {
+      "main": [
+        [
+          {
+            "node": "Notify Topic Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch the topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate voice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Scene Image": {
+      "main": [
+        [
+          {
+            "node": "Set Image Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Image Public": {
+      "main": [
+        [
+          {
+            "node": "Set Image URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Image URL": {
+      "main": [
+        [
+          {
+            "node": "Image-to-Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene Image": {
+      "main": [
+        [
+          {
+            "node": "Upload Scene Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image-to-Video": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Video Status": {
+      "main": [
+        [
+          {
+            "node": "Video Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Poll Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Failed?": {
+      "main": [
+        [
+          {
+            "node": "Stop and Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Video Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Video Ready?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Video Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Video Result": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "Extract_Video_URLs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Scene Image Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Pair Videos with Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate voice": {
+      "main": [
+        [
+          {
+            "node": "Upload VoiceOver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Access Permissions": {
+      "main": [
+        [
+          {
+            "node": "Extract_Voiceover_URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload VoiceOver": {
+      "main": [
+        [
+          {
+            "node": "Set Access Permissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pair Videos with Audio": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Final Video": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate-Video-Creatomate": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Notify me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "fetch_final_video_url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 Second1": {
+      "main": [
+        [
+          {
+            "node": "Publish Image Container to Instagram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Image Container to Instagram": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post Video to Instagram Container": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 Second1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract_Video_URLs": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extract_Voiceover_URL": {
+      "main": [
+        [
+          {
+            "node": "Pair Videos with Audio",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Generate-Video-Creatomate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch_final_video_url": {
+      "main": [
+        [
+          {
+            "node": "download final video",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get approval to post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "download final video": {
+      "main": [
+        [
+          {
+            "node": "Upload Final Video",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get approval to post1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get approval to post": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Post Video to Instagram Container",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get approval to post1": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Google Sheets3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Scene Image Input": {
+      "main": [
+        [
+          {
+            "node": "Has Machine Reference?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Machine Reference?": {
+      "main": [
+        [
+          {
+            "node": "Generate Scene Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Scene Image (Text Only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Scene Image (Text Only)": {
+      "main": [
+        [
+          {
+            "node": "Upload Scene Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e9d115ff9afc7f0518ad78c74c97e90d5158bf3b39d9084307181afbd851bd2d"
+  }
+}

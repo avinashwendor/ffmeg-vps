@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+reels-composer/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local test artifacts
+.tmp-test/
+
+# OS / editor
+.DS_Store
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local secrets (never commit)
+build_secrets_local.py
