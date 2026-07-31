@@ -25,6 +25,7 @@ reels-composer/           # FFmpeg render API on Railway
 ```bash
 python3 build/build_workflow.py    # writes the JSON and validates it
 python3 build/test_reels_nodes.py  # executes the Code nodes
+npm --prefix reels-composer test   # renders real files through ffmpeg
 ```
 
 `build_workflow.py` fails the build if any Code node does not parse. **Do not
@@ -54,19 +55,98 @@ How sync is held together — the important part:
    concatenating the segments. The audio and the scenes are then *the same
    thing*, not two independent guesses at the same thing. This is the single
    change that makes sync work.
-3. TTS reads that one string. Cartesia is pinned to 128 kbps so
-   **Finalize Voiceover** can derive the true duration from the file size.
-4. **Build Sync Map** splits the measured audio across the 5 scenes by word
-   share, then generates *both* the SRT and the per-clip trim/speed plan from
-   that one timeline. Clips 1-4 carry an extra transition length because xfade
-   overlaps neighbours; clip 5 carries a 0.25s tail so `-shortest` cannot clip
-   the last word.
-5. **Start Render** sends that plan verbatim. The model is only asked to pick a
-   look — colour, subtitle face, transition length, per-clip zoom. A model
-   choosing trim points is how a reel ends up out of sync.
+3. TTS reads that one string and reports **where every word falls** (see below).
+4. **Build Sync Map** cuts each scene at the moment its first word is spoken,
+   then generates *both* the SRT and the per-clip trim/speed plan from that one
+   timeline. Clips 1-4 carry an extra transition length because xfade overlaps
+   neighbours; clip 5 carries a 0.25s tail so `-shortest` cannot clip the last
+   word.
+5. **Start Render** sends that plan verbatim, along with the `voiceover_sec`,
+   `transition_sec` and `tail_sec` it was built against. The model is only asked
+   to pick a look — colour, subtitle face, transition length, per-clip zoom. A
+   model choosing trim points is how a reel ends up out of sync.
+6. **The composer corrects the plan against reality** before it renders. See
+   below.
 
 Anything that cannot be made to fit surfaces in `sync_warnings`, which is shown
 in the Telegram package. It never silently produces a desynced video.
+
+### TTS runs three deep, and it is about captions as much as audio
+
+| order | endpoint | gives |
+| ----- | -------- | ----- |
+| 1 | Cartesia `/tts/sse` | PCM **plus per-word timestamps** |
+| 2 | Cartesia `/tts/bytes` | plain mp3, no timestamps |
+| 3 | ElevenLabs `/with-timestamps` | mp3 plus a *character* alignment |
+
+Each branch labels its own output (`tts_provider`, `voiceover_ext`,
+`word_timings`) so nothing downstream has to sniff which node produced the
+audio, and each falls through to the next rather than stopping the run.
+
+Two things about the first branch are not obvious:
+
+- `/tts/sse` is the **only** Cartesia endpoint that emits timestamps, and it
+  rejects every container but `raw`. So what comes back is bare PCM, and
+  `PARSE_CARTESIA_SSE_JS` puts a 44-byte WAV header on it itself. ffprobe reads
+  the result exactly, which is strictly better than the bitrate arithmetic the
+  mp3 path needed. At `VOICEOVER_SAMPLE_RATE` a 50s reel is a ~4.4 MB WAV —
+  drop that constant to 22050 if n8n struggles with the payload.
+- Timestamps **arrive in slices**, one event per handful of words, so they must
+  be gathered across the whole stream rather than read off the first event that
+  has any. A stream that ends without a `done` event is rejected outright: a
+  truncated voiceover is worse than falling back to the mp3 endpoint.
+
+### Captions sit on the word, not near it
+
+When the timings line up 1:1 with the script, every scene boundary and every
+subtitle cue is cut at the exact moment its first word is spoken, and each cue
+holds until the next one starts instead of blinking off in every pause.
+
+Alignment is checked, not assumed: `alignTimings` walks both lists and merges
+spans where the engine split one word into several tokens. Anything beyond that
+and it returns `null`, because hanging the whole timeline off a bad alignment is
+worse than estimating. The fallback estimate weights each scene by `speechUnits`
+(syllables + a per-word gap + a pause for punctuation) rather than word count —
+"profits stall" and "eighty thousand rupees" are both three words and nowhere
+near the same length of speech. Only the ratios matter, so those constants never
+need calibrating to real seconds.
+
+A fallback is reported in `sync_warnings` and in `caption_timing_source`, never
+silent. Cues also break on a character budget so a run of long words cannot
+produce a caption wider than the frame.
+
+### The plan is a prediction; the composer checks it
+
+Two things about the plan can be wrong on arrival, and both used to cut the last
+words off the reel:
+
+- `voiceover_sec` is measured before this service ever sees the file — exactly
+  when the WAV path ran, but derived from **byte size** on the mp3 fallbacks,
+  where an ID3 tag or a provider ignoring the requested bitrate shifts it.
+- the render director is allowed to pick a **250-400ms crossfade**, while the
+  plan budgeted for whatever `transition_sec` the manifest recorded. A longer
+  crossfade eats more of every clip: at 400ms against a 300ms plan the reel
+  finishes 0.15s early.
+
+So `renderReel` downloads the voiceover **first**, ffprobes it, and rescales the
+per-clip windows and the SRT (`voiceoverScale`, `rescalePerClip`, `scaleSrt`).
+Each clip's window is a speech share plus a fixed overlap: the share scales, the
+overlap is *swapped*, never stretched. Probing first also means a dead link
+fails in seconds instead of after five minutes of encoding.
+
+A ratio beyond 0.5-2x is treated as a plan belonging to a different run and left
+alone rather than stretched to fit.
+
+### Nothing ships unchecked
+
+`qcReel` runs on the finished file: length against the voiceover that was
+actually measured, exactly one audio track, a 1080x1920 frame. The result rides
+on the job and into the Telegram reply. A reel that fails is still uploaded —
+but the message leads with the problem instead of "your reel is ready", and the
+compose session stays open so the five clips do not have to be sent again.
+
+`reels-composer/test/sync_qc.test.mjs` renders these cases for real, including a
+manifest that under-estimates the voiceover by 10%.
 
 ## Clip naming is the contract
 
@@ -119,9 +199,25 @@ every render finishes the whole ffmpeg pipeline and then dies on the final
 upload with `InvalidAccessKeyId`. The other S3 variables have working defaults.
 
 Optional: `AUTH_TOKEN` (pair with `COMPOSER_AUTH_TOKEN` in
-`build/secrets_local.py`), `FFMPEG_THREADS`, `FFMPEG_PRESET`, `FFMPEG_CRF`.
+`build/secrets_local.py`), `FFMPEG_THREADS`, `FFMPEG_PRESET`, `FFMPEG_CRF`,
+`QC_TOLERANCE_SEC`, `JOB_TTL_MS`, `S3_DOWNLOAD_ATTEMPTS`.
 
-Two bugs fixed in `reels-composer/src/renderJob.js` that both failed silently:
+`GET /health` reports `s3_configured`, `queue_depth` and `jobs_tracked`, so a
+service missing its S3 keys is visible without waiting for a render to die on
+the final upload.
+
+Renders are **serialised** — one at a time, whatever arrives. ffmpeg is tuned to
+sit inside the container's memory limit for a single 1080x1920 encode; two
+concurrent renders is how the OOM killer comes back. Requests are still accepted
+immediately and queued.
+
+Burning subtitles needs an ffmpeg built with **libass**. Debian's `ffmpeg`
+package has it, which is what the Dockerfile installs; many static builds do
+not, and the filter is simply absent. `renderReel` checks for it before encoding
+anything, because the failure otherwise lands at the very last step as an
+unhelpful filtergraph parse error.
+
+Bugs fixed in `reels-composer/src/renderJob.js` that all failed silently:
 
 - `downloadToFile` was used without being imported, so **every** render failed
   with `downloadToFile is not defined`.
@@ -129,8 +225,13 @@ Two bugs fixed in `reels-composer/src/renderJob.js` that both failed silently:
   `-vf`. Those are aliases, so the later flag won and per-clip `speed` was
   quietly discarded — sync correction never actually applied.
 
+- a crossfade longer than the plan assumed shortened the reel by 0.15s, which
+  is under any tolerance worth failing on and still clips the last word.
+
 Also: subtitle colours are now converted to ASS `&HBBGGRR` instead of a
 find-and-replace that never matched, and trims use `-t` rather than `-to`.
+Captions are wrapped deliberately (`wrapCue`) rather than left to libass, which
+picks its own break point and strands single words on a second line.
 
 A third failure was environmental. Any render of two or more clips died with a
 null exit code — the container OOM killer. ffmpeg sizes its thread pools from

@@ -80,11 +80,37 @@ function presignPutUrl(key, contentType) {
   return `https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`;
 }
 
+const DOWNLOAD_ATTEMPTS = Number(process.env.S3_DOWNLOAD_ATTEMPTS) || 3;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A render is five clips plus a voiceover, several minutes of work, and a single
+// transient 5xx on the last download used to throw all of it away. 4xx is not
+// retried — a signature that has expired will not un-expire.
 async function downloadToFile(url, destPath) {
   await fs.mkdir(dirname(destPath), { recursive: true });
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Download failed ${res.status}: ${url}`);
-  await pipeline(Readable.fromWeb(res.body), createWriteStream(destPath));
+  let lastErr;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = new Error(`Download failed ${res.status}: ${url.split('?')[0]}`);
+        if (res.status >= 400 && res.status < 500) throw err;
+        throw Object.assign(err, { retryable: true });
+      }
+      await pipeline(Readable.fromWeb(res.body), createWriteStream(destPath));
+      const { size } = await fs.stat(destPath);
+      if (!size) throw Object.assign(new Error(`Downloaded 0 bytes: ${url.split('?')[0]}`), { retryable: true });
+      return;
+    } catch (err) {
+      lastErr = err;
+      // fetch itself rejects on DNS/socket failures, which are worth another go.
+      const retryable = err.retryable || err.name === 'TypeError' || err.cause;
+      if (!retryable || attempt === DOWNLOAD_ATTEMPTS) throw lastErr;
+      await sleep(500 * 2 ** (attempt - 1));
+    }
+  }
+  throw lastErr;
 }
 
 async function uploadFile(key, filePath, contentType) {

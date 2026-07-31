@@ -27,6 +27,9 @@ from reel_timing import (  # noqa: E402
     TRANSITION_SEC,
     USABLE_SEC,
     VOICEOVER_BITRATE,
+    VOICEOVER_BITS_PER_SAMPLE,
+    VOICEOVER_CHANNELS,
+    VOICEOVER_SAMPLE_RATE,
     WORDS_MAX,
     WORDS_MIN,
     WORDS_PER_SEC,
@@ -549,6 +552,41 @@ S3_PUT_RESPONSE_OPTS = {
     },
 }
 
+# Shared by Normalize Script Timing and Build Sync Map. Code nodes cannot
+# import, so it is inlined into both.
+SPEECH_UNITS_JS = """
+// How long a line takes to say, in syllable-equivalents.
+//
+// Word count is what the split used to run on, and it is a poor proxy: "profits
+// stall" and "eighty thousand rupees" are both three words and nowhere near the
+// same length of speech. Since the measured voiceover is divided between the
+// scenes by these weights, a bad proxy moves every clip boundary off its
+// sentence. Only the ratios matter here, so the constants need to be sensible
+// relative to each other, not calibrated to real seconds.
+function syllableCount(word) {
+  const w = String(word || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!w) return 0;
+  let n = (w.match(/[aeiouy]+/g) || []).length;
+  // A silent terminal 'e' is not its own syllable: "machine", "store", "twelve".
+  if (n > 1 && w.length > 2 && /e$/.test(w) && !/[aeiouy]e$/.test(w)) n -= 1;
+  return Math.max(1, n);
+}
+
+function speechUnits(text) {
+  const s = String(text || '').trim();
+  if (!s) return 0;
+  const words = s.split(/\\s+/).filter(Boolean);
+  let units = 0;
+  for (const w of words) units += syllableCount(w);
+  // The gap between two words is real time even though nothing is voiced.
+  units += words.length * 0.35;
+  // Punctuation is where a narrator actually breathes.
+  units += (s.match(/[,;:—-]/g) || []).length * 0.7;
+  units += (s.match(/[.!?]/g) || []).length * 1.4;
+  return Number(units.toFixed(3));
+}
+"""
+
 PREPARE_VOICEOVER_JS = """
 const item = $input.first().json;
 const text = String(item.script?.full_script || '').trim();
@@ -580,25 +618,219 @@ return [{
 }];
 """
 
-# Task runner cannot PUT binary via Code node (getBinaryDataBuffer / httpRequest → "Unknown error").
-PREPARE_S3_UPLOAD_JS = s3_common_js() + """
-const ctx = $('Prepare Voiceover').first().json;
-const bin = $input.first().binary?.voiceover;
-if (!bin?.fileName) {
-  throw new Error('Voiceover MP3 missing. Check Cartesia/ElevenLabs HTTP nodes and API keys.');
-}
+# Shared by both timestamp-capable TTS branches.
+WAV_HEADER_JS = f"""
+// Cartesia will only emit word timestamps from /tts/sse, and that endpoint
+// refuses every container but 'raw' — so the audio arrives as bare PCM and this
+// workflow has to put a container round it. A 44-byte canonical WAV header is
+// the whole job, and ffprobe reads the result exactly, which is better than the
+// bitrate arithmetic the mp3 path had to rely on.
+const VO_RATE = {VOICEOVER_SAMPLE_RATE};
+const VO_BITS = {VOICEOVER_BITS_PER_SAMPLE};
+const VO_CHANNELS = {VOICEOVER_CHANNELS};
 
-let tts_provider = 'cartesia';
-try {
-  const cartesiaBin = $('Cartesia TTS').first()?.binary?.voiceover;
-  if (!cartesiaBin?.fileName) {
-    tts_provider = 'elevenlabs';
+function wavFromPcm(pcm) {{
+  const blockAlign = (VO_CHANNELS * VO_BITS) / 8;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(VO_CHANNELS, 22);
+  header.writeUInt32LE(VO_RATE, 24);
+  header.writeUInt32LE(VO_RATE * blockAlign, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(VO_BITS, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}}
+
+function pcmSeconds(pcm) {{
+  return pcm.length / (VO_RATE * ((VO_CHANNELS * VO_BITS) / 8));
+}}
+"""
+
+# Cartesia streams the timestamps in slices, one event per handful of words, so
+# they have to be gathered across the whole stream rather than read from the
+# first event that carries any.
+PARSE_CARTESIA_SSE_JS = WAV_HEADER_JS + """
+const prep = $('Prepare Voiceover').first().json;
+const input = $input.first();
+
+function bodyText(item) {
+  const j = item.json;
+  if (typeof j === 'string') return j;
+  if (typeof j?.data === 'string') return j.data;
+  const bin = item.binary?.data;
+  if (typeof bin?.data === 'string') {
+    try { return Buffer.from(bin.data, 'base64').toString('utf8'); } catch (e) { return ''; }
   }
-} catch {
-  tts_provider = 'elevenlabs';
+  return '';
 }
 
-const key = `reels-voiceovers/${ctx.topic_slug}-${ctx.run_id}.mp3`;
+function bail(reason) {
+  return [{ json: { ...prep, tts_ok: false, tts_error: reason, word_timings: [] } }];
+}
+
+const text = bodyText(input);
+if (!text) return bail('Cartesia SSE returned an empty body');
+
+const pcmChunks = [];
+const words = [];
+const starts = [];
+const ends = [];
+let sawDone = false;
+let apiError = '';
+
+for (const line of text.split(/\\r?\\n/)) {
+  if (!line.startsWith('data:')) continue;
+  const payload = line.slice(5).trim();
+  if (!payload || payload === '[DONE]') continue;
+  let ev;
+  try { ev = JSON.parse(payload); } catch (e) { continue; }
+
+  if (ev.type === 'error' || ev.error) {
+    apiError = String(ev.error || ev.message || 'Cartesia reported an error');
+    continue;
+  }
+  if (ev.type === 'chunk' && typeof ev.data === 'string' && ev.data) {
+    pcmChunks.push(Buffer.from(ev.data, 'base64'));
+  }
+  if (ev.type === 'timestamps' && ev.word_timestamps && Array.isArray(ev.word_timestamps.words)) {
+    const wt = ev.word_timestamps;
+    words.push(...wt.words);
+    starts.push(...(wt.start || []));
+    ends.push(...(wt.end || []));
+  }
+  if (ev.type === 'done') sawDone = true;
+}
+
+if (apiError) return bail(`Cartesia SSE error: ${apiError}`);
+if (!pcmChunks.length) return bail('Cartesia SSE carried no audio chunks');
+// A stream that stopped early yields a voiceover missing its last words, which
+// is far worse than falling back to the plain mp3 endpoint and re-reading it.
+if (!sawDone) return bail('Cartesia SSE ended without a done event — the audio would be truncated');
+
+const pcm = Buffer.concat(pcmChunks);
+const wav = wavFromPcm(pcm);
+
+const word_timings = words.map((w, i) => ({
+  word: String(w || ''),
+  start: Number(starts[i]),
+  end: Number(ends[i]),
+})).filter((t) => t.word && Number.isFinite(t.start) && Number.isFinite(t.end));
+
+return [{
+  json: {
+    ...prep,
+    tts_ok: true,
+    tts_provider: 'cartesia',
+    voiceover_ext: 'wav',
+    voiceover_mime: 'audio/wav',
+    voiceover_measured_sec: Number(pcmSeconds(pcm).toFixed(3)),
+    word_timings,
+    word_timing_source: word_timings.length ? 'cartesia word timestamps' : 'none returned',
+  },
+  binary: {
+    voiceover: { data: wav.toString('base64'), mimeType: 'audio/wav', fileName: 'voiceover.wav' },
+  },
+}];
+"""
+
+# The mp3 endpoint is the same model and voice, just without timestamps. It is
+# what catches an SSE response n8n could not carry.
+MARK_CARTESIA_BYTES_JS = """
+const prep = $('Prepare Voiceover').first().json;
+const input = $input.first();
+const bin = input.binary?.voiceover;
+if (!bin?.fileName) {
+  return [{ json: { ...prep, tts_ok: false, tts_error: 'Cartesia /tts/bytes returned no audio', word_timings: [] } }];
+}
+return [{
+  json: {
+    ...prep,
+    tts_ok: true,
+    tts_provider: 'cartesia',
+    voiceover_ext: 'mp3',
+    voiceover_mime: 'audio/mpeg',
+    word_timings: [],
+    word_timing_source: 'none — /tts/bytes carries no timestamps',
+  },
+  binary: input.binary,
+}];
+"""
+
+# ElevenLabs times individual characters rather than words, so the words have to
+# be rebuilt from the character spans.
+PARSE_ELEVENLABS_JS = """
+const prep = $('Prepare Voiceover').first().json;
+const res = $input.first().json || {};
+
+const audio_base64 = res.audio_base64 || res.audioBase64 || '';
+if (!audio_base64) {
+  throw new Error(`ElevenLabs returned no audio_base64. Keys: ${Object.keys(res).join(', ')}`);
+}
+
+// normalized_alignment matches what was actually spoken; alignment matches the
+// text as submitted. Either is fine for word spans, so take whichever is there.
+const al = res.normalized_alignment || res.alignment || {};
+const chars = al.characters || [];
+const cs = al.character_start_times_seconds || [];
+const ce = al.character_end_times_seconds || [];
+
+const word_timings = [];
+let cur = '';
+let start = null;
+let end = null;
+for (let i = 0; i < chars.length; i++) {
+  const ch = String(chars[i] ?? '');
+  if (!ch.trim()) {
+    if (cur) word_timings.push({ word: cur, start, end });
+    cur = ''; start = null; end = null;
+    continue;
+  }
+  if (!cur) start = Number(cs[i]);
+  cur += ch;
+  end = Number(ce[i]);
+}
+if (cur) word_timings.push({ word: cur, start, end });
+
+const clean = word_timings.filter((t) => t.word && Number.isFinite(t.start) && Number.isFinite(t.end));
+
+return [{
+  json: {
+    ...prep,
+    tts_ok: true,
+    tts_provider: 'elevenlabs',
+    voiceover_ext: 'mp3',
+    voiceover_mime: 'audio/mpeg',
+    voiceover_measured_sec: clean.length ? Number(clean[clean.length - 1].end.toFixed(3)) : 0,
+    word_timings: clean,
+    word_timing_source: clean.length ? 'elevenlabs character alignment' : 'none returned',
+  },
+  binary: {
+    voiceover: { data: audio_base64, mimeType: 'audio/mpeg', fileName: 'voiceover.mp3' },
+  },
+}];
+"""
+
+# Task runner cannot PUT binary via Code node (getBinaryDataBuffer / httpRequest → "Unknown error").
+# Every TTS branch now labels its own output — provider, container and whatever
+# word timings it managed to return — so this no longer has to sniff which
+# upstream node happened to produce the audio.
+PREPARE_S3_UPLOAD_JS = s3_common_js() + """
+const input = $input.first();
+const ctx = input.json;
+const bin = input.binary?.voiceover;
+if (!bin?.data) {
+  throw new Error('Voiceover audio missing. Check the Cartesia/ElevenLabs nodes and API keys.');
+}
+
+const ext = ctx.voiceover_ext === 'wav' ? 'wav' : 'mp3';
+const key = `reels-voiceovers/${ctx.topic_slug}-${ctx.run_id}.${ext}`;
 const upload_url = presignPutUrl(key);
 
 return [{
@@ -607,9 +839,9 @@ return [{
     voiceover_key: key,
     upload_url,
     storage_bucket: BUCKET,
-    tts_provider,
+    tts_provider: ctx.tts_provider || 'unknown',
   },
-  binary: $input.first().binary,
+  binary: input.binary,
 }];
 """
 
@@ -708,9 +940,15 @@ NODE_POSITIONS = {
     "OpenRouter Match Images": [DX * 12, 840],
     "Parse Match Images": [DX * 13, 840],
     "Prepare Voiceover": [DX * 14, 840],
-    "Cartesia TTS": [DX * 15, 840],
-    "IF Cartesia OK": [DX * 16, 840],
-    "ElevenLabs TTS": [DX * 16, 1040],
+    # Three TTS branches, each dropping a row as it falls back.
+    "Cartesia TTS SSE": [DX * 15, 840],
+    "Parse Cartesia SSE": [DX * 15, 960],
+    "IF Cartesia SSE OK": [DX * 16, 840],
+    "Cartesia TTS Bytes": [DX * 15, 1120],
+    "Mark Cartesia Bytes": [DX * 15, 1240],
+    "IF Cartesia Bytes OK": [DX * 16, 1120],
+    "ElevenLabs TTS": [DX * 15, 1400],
+    "Parse ElevenLabs TTS": [DX * 16, 1400],
     "Prepare S3 Upload": [DX * 17, 840],
     "S3 PUT Voiceover": [DX * 18, 840],
     "S3 PUT Voiceover OK": [DX * 19, 840],
@@ -1314,7 +1552,7 @@ return [{{ json: {{ ...item, script }} }}];"""
 # Anything the model got wrong about length is measured and reported now
 # rather than discovered in the finished render.
 add_node("Normalize Script Timing", "n8n-nodes-base.code", {
-    "jsCode": f"""const item = $input.first().json;
+    "jsCode": SPEECH_UNITS_JS + f"""const item = $input.first().json;
 const script = {{ ...(item.script || {{}}) }};
 
 const CLIP_COUNT = {CLIP_COUNT};
@@ -1364,6 +1602,8 @@ for (let i = 0; i < CLIP_COUNT; i++) {{
     voiceover_segment: spoken,
     on_screen_text: String(raw.on_screen_text || '').trim(),
     word_count: words,
+    // What Build Sync Map divides the measured voiceover by.
+    speech_units: speechUnits(spoken),
     estimated_sec,
   }});
 }}
@@ -1490,7 +1730,60 @@ add_node("Prepare Voiceover", "n8n-nodes-base.code", {
     "jsCode": PREPARE_VOICEOVER_JS,
 }, 2)
 
-add_node("Cartesia TTS", "n8n-nodes-base.httpRequest", {
+# TTS runs three deep, and the order is about captions as much as audio.
+#
+#   1. Cartesia /tts/sse   — PCM plus per-word timestamps. Captions are cut to
+#                            measured word boundaries instead of an estimate.
+#   2. Cartesia /tts/bytes — same model and voice, plain mp3, no timestamps.
+#                            Catches an SSE response the runner could not carry.
+#   3. ElevenLabs          — different vendor, and its with-timestamps endpoint
+#                            keeps the accurate captions.
+#
+# Every branch is allowed to fail into the next, and the pipeline degrades to
+# estimated caption timing rather than stopping.
+add_node("Cartesia TTS SSE", "n8n-nodes-base.httpRequest", {
+    "method": "POST",
+    "url": "https://api.cartesia.ai/tts/sse",
+    "sendHeaders": True,
+    "headerParameters": {"parameters": [
+        {"name": "Authorization", "value": f"Bearer {CARTESIA_API_KEY}"},
+        {"name": "Cartesia-Version", "value": "2024-11-13"},
+        {"name": "Content-Type", "value": "application/json"},
+        {"name": "Accept", "value": "text/event-stream"},
+    ]},
+    "sendBody": True,
+    "specifyBody": "json",
+    # This endpoint rejects every container but 'raw', which is why the workflow
+    # builds the WAV itself. add_timestamps is the whole point of using it.
+    "jsonBody": (
+        '={{ JSON.stringify({ model_id: "sonic-3.5", transcript: $json._voiceover_text, '
+        f'voice: {{ mode: "id", id: "{CARTESIA_VOICE_ID}" }}, language: "en", add_timestamps: true, '
+        f'output_format: {{ container: "raw", encoding: "pcm_s16le", sample_rate: {VOICEOVER_SAMPLE_RATE} }} }}) }}}}'
+    ),
+    "options": {"response": {"response": {"responseFormat": "text", "outputPropertyName": "data"}}, "timeout": 180000},
+}, 4.2, {"onError": "continueRegularOutput"})
+
+add_node("Parse Cartesia SSE", "n8n-nodes-base.code", {
+    "jsCode": PARSE_CARTESIA_SSE_JS,
+}, 2, {"onError": "continueRegularOutput"})
+
+add_node("IF Cartesia SSE OK", "n8n-nodes-base.if", {
+    "conditions": {
+        "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+        "conditions": [
+            {
+                "id": nid(),
+                "leftValue": "={{ $json.tts_ok }}",
+                "rightValue": True,
+                "operator": {"type": "boolean", "operation": "true"},
+            },
+        ],
+        "combinator": "and",
+    },
+    "looseTypeValidation": True, "options": {},
+}, 2.2)
+
+add_node("Cartesia TTS Bytes", "n8n-nodes-base.httpRequest", {
     "method": "POST",
     "url": "https://api.cartesia.ai/tts/bytes",
     "sendHeaders": True,
@@ -1502,24 +1795,29 @@ add_node("Cartesia TTS", "n8n-nodes-base.httpRequest", {
     ]},
     "sendBody": True,
     "specifyBody": "json",
-    # bit_rate is pinned so Build Sync Map can derive duration from file size.
+    # bit_rate is pinned so a duration can still be derived from the file size
+    # when this branch runs, since it returns no timestamps to measure against.
     "jsonBody": (
-        '={{ JSON.stringify({ model_id: "sonic-3.5", transcript: $json._voiceover_text, '
+        '={{ JSON.stringify({ model_id: "sonic-3.5", transcript: $(\'Prepare Voiceover\').first().json._voiceover_text, '
         f'voice: {{ mode: "id", id: "{CARTESIA_VOICE_ID}" }}, '
         f'output_format: {{ container: "mp3", sample_rate: 44100, bit_rate: {VOICEOVER_BITRATE} }} }}) }}}}'
     ),
     "options": TTS_FILE_RESPONSE_OPTS,
 }, 4.2, {"onError": "continueRegularOutput"})
 
-add_node("IF Cartesia OK", "n8n-nodes-base.if", {
+add_node("Mark Cartesia Bytes", "n8n-nodes-base.code", {
+    "jsCode": MARK_CARTESIA_BYTES_JS,
+}, 2, {"onError": "continueRegularOutput"})
+
+add_node("IF Cartesia Bytes OK", "n8n-nodes-base.if", {
     "conditions": {
         "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
         "conditions": [
             {
                 "id": nid(),
-                "leftValue": "={{ $binary.voiceover?.fileName || '' }}",
-                "rightValue": "",
-                "operator": {"type": "string", "operation": "notEmpty"},
+                "leftValue": "={{ $json.tts_ok }}",
+                "rightValue": True,
+                "operator": {"type": "boolean", "operation": "true"},
             },
         ],
         "combinator": "and",
@@ -1527,20 +1825,34 @@ add_node("IF Cartesia OK", "n8n-nodes-base.if", {
     "looseTypeValidation": True, "options": {},
 }, 2.2)
 
+# with-timestamps returns JSON — base64 audio plus a character-level alignment —
+# rather than a raw mp3 body, so this one is not a file response.
 add_node("ElevenLabs TTS", "n8n-nodes-base.httpRequest", {
     "method": "POST",
-    "url": "={{ 'https://api.elevenlabs.io/v1/text-to-speech/' + $json._eleven_voice_id + '?output_format=mp3_44100_128' }}",
+    "url": (
+        "={{ 'https://api.elevenlabs.io/v1/text-to-speech/'"
+        " + $('Prepare Voiceover').first().json._eleven_voice_id"
+        " + '/with-timestamps?output_format=mp3_44100_128' }}"
+    ),
     "sendHeaders": True,
     "headerParameters": {"parameters": [
         {"name": "xi-api-key", "value": ELEVENLABS_KEY},
         {"name": "Content-Type", "value": "application/json"},
-        {"name": "Accept", "value": "audio/mpeg"},
+        {"name": "Accept", "value": "application/json"},
     ]},
     "sendBody": True,
     "specifyBody": "json",
-    "jsonBody": '={{ JSON.stringify({ text: $json._voiceover_text, model_id: "eleven_flash_v2_5", voice_settings: { stability: 0.5, similarity_boost: 0.75 } }) }}',
-    "options": TTS_FILE_RESPONSE_OPTS,
+    "jsonBody": (
+        '={{ JSON.stringify({ text: $(\'Prepare Voiceover\').first().json._voiceover_text, '
+        'model_id: "eleven_flash_v2_5", '
+        'voice_settings: { stability: 0.5, similarity_boost: 0.75 } }) }}'
+    ),
+    "options": {"timeout": 180000},
 }, 4.2)
+
+add_node("Parse ElevenLabs TTS", "n8n-nodes-base.code", {
+    "jsCode": PARSE_ELEVENLABS_JS,
+}, 2)
 
 add_node("Prepare S3 Upload", "n8n-nodes-base.code", {
     "jsCode": PREPARE_S3_UPLOAD_JS,
@@ -1568,7 +1880,7 @@ add_node("Finalize Voiceover", "n8n-nodes-base.code", {
 # render timing are both generated from that one timeline — so subtitles,
 # audio and picture cannot disagree.
 add_node("Build Sync Map", "n8n-nodes-base.code", {
-    "jsCode": f"""const ctx = $input.first().json;
+    "jsCode": SPEECH_UNITS_JS + f"""const ctx = $input.first().json;
 const scenes = ctx.script?.scenes || [];
 
 const CLIP_COUNT = {CLIP_COUNT};
@@ -1594,23 +1906,120 @@ function timecode(sec) {{
 }}
 function srtStamp(sec) {{ return `00:${{timecode(sec)}}`; }}
 
-// Both TTS providers return constant-bitrate mp3, so bytes give a reliable
-// duration without downloading and probing the file.
-const bytes = Number(ctx.voiceover_bytes || 0);
-const measured_sec = bytes > 0 ? (bytes * 8) / BITRATE : 0;
-const words = scenes.reduce((n, s) => n + (Number(s.word_count) || 0), 0);
-const fallback_sec = words ? words / WORDS_PER_SEC : TOTAL_SEC;
-// Guard against a truncated or padded file throwing the whole timeline off.
-const plausible = measured_sec > TOTAL_SEC * 0.5 && measured_sec < TOTAL_SEC * 2;
-const voiceover_sec = round2(plausible ? measured_sec : fallback_sec);
-const duration_source = plausible ? 'measured from mp3 size' : 'estimated from word count';
+// ---- how long the voiceover actually runs ---------------------------------
+// Best to worst: the TTS told us where every word falls, the audio was measured
+// as it was assembled, the mp3 is constant-bitrate so its size implies a
+// duration, or nothing is known and the word budget is all there is.
+const norm = (w) => String(w || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+const sceneWords = scenes.map((s) => String(s.voiceover_segment || '').split(/\\s+/).filter(Boolean));
+const scriptWords = sceneWords.flat();
+const rawTimings = (Array.isArray(ctx.word_timings) ? ctx.word_timings : []).filter((t) =>
+  t && norm(t.word) && Number.isFinite(Number(t.start)) && Number.isFinite(Number(t.end))
+);
 
-// Share the real audio out by word count — a 25-word scene genuinely takes
-// longer to say than a 15-word one.
-const weights = scenes.map((s) => Math.max(1, Number(s.word_count) || 1));
+// One timing per spoken word is the happy path. Where the engine split a word
+// into several tokens the spans are merged back; anything beyond that and the
+// two lists have genuinely diverged, so the estimate is used instead of
+// confidently hanging the whole timeline off a bad alignment.
+function alignTimings() {{
+  if (!rawTimings.length || !scriptWords.length) return null;
+  const out = [];
+  let ti = 0;
+  for (const word of scriptWords) {{
+    if (ti >= rawTimings.length) return null;
+    const target = norm(word);
+    let start = Number(rawTimings[ti].start);
+    let end = Number(rawTimings[ti].end);
+    let acc = norm(rawTimings[ti].word);
+    ti += 1;
+    let guard = 0;
+    while (acc !== target && target.startsWith(acc) && ti < rawTimings.length && guard < 6) {{
+      acc += norm(rawTimings[ti].word);
+      end = Number(rawTimings[ti].end);
+      ti += 1;
+      guard += 1;
+    }}
+    if (acc !== target) return null;
+    out.push({{ start, end }});
+  }}
+  // Leftover timings mean the engine spoke something the script does not have.
+  return ti === rawTimings.length ? out : null;
+}}
+
+const aligned = alignTimings();
+const spokenEnd = aligned && aligned.length ? Number(aligned[aligned.length - 1].end) : 0;
+
+const bytes = Number(ctx.voiceover_bytes || 0);
+const fromBytes = bytes > 0 ? (bytes * 8) / BITRATE : 0;
+const fromFile = Number(ctx.voiceover_measured_sec || 0);
+const totalWords = scenes.reduce((n, s) => n + (Number(s.word_count) || 0), 0);
+const fallback_sec = totalWords ? totalWords / WORDS_PER_SEC : TOTAL_SEC;
+// Guard against a truncated or padded file throwing the whole timeline off.
+const plausible = (v) => v > TOTAL_SEC * 0.5 && v < TOTAL_SEC * 2;
+
+let voiceover_sec;
+let duration_source;
+if (plausible(fromFile)) {{
+  voiceover_sec = fromFile;
+  duration_source = 'measured from the audio itself';
+}} else if (plausible(fromBytes)) {{
+  voiceover_sec = fromBytes;
+  duration_source = 'derived from mp3 size';
+}} else if (plausible(spokenEnd)) {{
+  voiceover_sec = spokenEnd;
+  duration_source = 'taken from the last word timestamp';
+}} else {{
+  voiceover_sec = fallback_sec;
+  duration_source = 'estimated from word count';
+}}
+// The picture can never be asked to end before the last word does.
+voiceover_sec = round2(Math.max(voiceover_sec, spokenEnd));
+
+// ---- where each scene sits on that timeline -------------------------------
+const everySceneSpeaks = sceneWords.every((ws) => ws.length > 0);
+const useTimings = Boolean(aligned) && everySceneSpeaks;
+
+// First word of each scene, as an index into the flattened script.
+const sceneStartIndex = [];
+{{
+  let n = 0;
+  for (const ws of sceneWords) {{ sceneStartIndex.push(n); n += ws.length; }}
+}}
+
+// Share the audio out by how long each scene takes to say. Word count was the
+// old proxy and it moved clip boundaries off their sentences whenever one scene
+// happened to use longer words than another. Only used when the TTS did not
+// tell us where the words actually landed.
+const weights = scenes.map((s) => Math.max(
+  0.5,
+  Number(s.speech_units) || speechUnits(s.voiceover_segment) || 1
+));
 const weightTotal = weights.reduce((a, b) => a + b, 0);
 
-let cursor = 0;
+const windows = [];
+if (useTimings) {{
+  for (let i = 0; i < CLIP_COUNT; i++) {{
+    // Clip 1 starts at zero so any leading silence belongs to it. Every later
+    // cut lands exactly where the next line starts speaking, which puts the
+    // crossfade inside the pause instead of across a word.
+    const start = i === 0 ? 0 : Number(aligned[sceneStartIndex[i]].start);
+    const end = i === CLIP_COUNT - 1 ? voiceover_sec : Number(aligned[sceneStartIndex[i + 1]].start);
+    windows.push({{ start: round2(start), end: round2(Math.max(end, start + 0.5)) }});
+  }}
+}} else {{
+  let cursor = 0;
+  for (let i = 0; i < CLIP_COUNT; i++) {{
+    const share = (weights[i] / weightTotal) * voiceover_sec;
+    const end = i === CLIP_COUNT - 1 ? voiceover_sec : cursor + share;
+    windows.push({{ start: round2(cursor), end: round2(end) }});
+    cursor = end;
+  }}
+}}
+
+const timing_source = useTimings
+  ? (ctx.word_timing_source || 'measured word timestamps')
+  : 'estimated from syllable weight';
+
 const sync_windows = [];
 const srtBlocks = [];
 let cueNumber = 0;
@@ -1621,11 +2030,9 @@ for (let i = 0; i < CLIP_COUNT; i++) {{
     || (ctx.matched_scenes || [])[i]
     || {{}};
 
-  const vo_start = round2(cursor);
-  const share = (weights[i] / weightTotal) * voiceover_sec;
-  const vo_end = round2(i === CLIP_COUNT - 1 ? voiceover_sec : cursor + share);
+  const vo_start = windows[i].start;
+  const vo_end = windows[i].end;
   const vo_len = round2(Math.max(0.5, vo_end - vo_start));
-  cursor = vo_end;
 
   // An xfade overlaps neighbours, so every clip but the last has to carry the
   // transition on top of its own voiceover or the reel ends up short and the
@@ -1641,17 +2048,52 @@ for (let i = 0; i < CLIP_COUNT; i++) {{
   }}
   const rendered_len = round2(trim_end / speed);
 
-  // Subtitles are cut from the same words at the same times as the audio.
-  const cueWords = String(scene.voiceover_segment || '').split(/\\s+/).filter(Boolean);
-  const perCue = 6;
-  const cueCount = Math.max(1, Math.ceil(cueWords.length / perCue));
-  for (let c = 0; c < cueCount && cueWords.length; c++) {{
-    const slice = cueWords.slice(c * perCue, (c + 1) * perCue);
-    if (!slice.length) continue;
-    const cueStart = vo_start + (vo_len * (c * perCue)) / cueWords.length;
-    const cueEnd = vo_start + (vo_len * Math.min(cueWords.length, (c + 1) * perCue)) / cueWords.length;
+  // Subtitles are cut from the same words on the same timeline as the audio.
+  // Cues break on a character budget as well as a word count so a run of long
+  // words cannot produce a caption wider than the frame, and each cue is timed
+  // by its share of the scene's speech rather than by where its words fall.
+  const MAX_CUE_WORDS = 6;
+  const MAX_CUE_CHARS = 42;
+  const wordsHere = sceneWords[i];
+  const cues = [];
+  let pending = [];
+  for (let wi = 0; wi < wordsHere.length; wi++) {{
+    const next = pending.concat(wi);
+    const nextText = next.map((k) => wordsHere[k]).join(' ');
+    if (pending.length && (next.length > MAX_CUE_WORDS || nextText.length > MAX_CUE_CHARS)) {{
+      cues.push(pending);
+      pending = [wi];
+    }} else {{
+      pending = next;
+    }}
+  }}
+  if (pending.length) cues.push(pending);
+
+  // Where each cue begins. Measured from the audio when the words lined up,
+  // otherwise shared out by how long each cue takes to say.
+  const cueStarts = [];
+  if (useTimings) {{
+    const base = sceneStartIndex[i];
+    for (const cue of cues) cueStarts.push(Number(aligned[base + cue[0]].start));
+  }} else {{
+    const cueUnits = cues.map((c) => Math.max(0.5, speechUnits(c.map((k) => wordsHere[k]).join(' '))));
+    const cueUnitTotal = cueUnits.reduce((a, b) => a + b, 0) || 1;
+    let cursor = vo_start;
+    for (const units of cueUnits) {{
+      cueStarts.push(cursor);
+      cursor += (units / cueUnitTotal) * vo_len;
+    }}
+  }}
+
+  for (let c = 0; c < cues.length; c++) {{
+    // Each cue holds until the next one starts rather than blinking off during
+    // every pause, and the last is pinned to the scene end so rounding cannot
+    // leave a gap before the cut.
+    const cueStart = Math.max(vo_start, cueStarts[c]);
+    const cueEnd = c === cues.length - 1 ? vo_end : Math.min(vo_end, cueStarts[c + 1]);
+    if (cueEnd <= cueStart) continue;
     cueNumber += 1;
-    srtBlocks.push(`${{cueNumber}}\\n${{srtStamp(cueStart)}} --> ${{srtStamp(cueEnd)}}\\n${{slice.join(' ')}}`);
+    srtBlocks.push(`${{cueNumber}}\\n${{srtStamp(cueStart)}} --> ${{srtStamp(cueEnd)}}\\n${{cues[c].map((k) => wordsHere[k]).join(' ')}}`);
   }}
 
   sync_windows.push({{
@@ -1679,6 +2121,11 @@ const rendered_total = round2(
 const drift = round2(rendered_total - voiceover_sec);
 
 const sync_warnings = [...(ctx.sync_warnings || [])];
+// Worth knowing: captions cut to measured words sit on the syllable rather than
+// near it, and a fallback is the difference between the two.
+if (rawTimings.length && !useTimings) {{
+  sync_warnings.push('The voice engine returned word timings but they did not line up with the script, so captions fall back to estimated timing.');
+}}
 // drift should sit at about +TAIL_SEC. Negative means the picture runs out
 // before the voiceover does, which is the only case that damages the reel.
 if (drift < -0.1) {{
@@ -1691,9 +2138,12 @@ return [{{ json: {{
   subtitles_srt,
   voiceover_sec,
   voiceover_duration_source: duration_source,
+  caption_timing_source: timing_source,
+  word_timings_aligned: useTimings,
   render_total_sec: rendered_total,
   render_drift_sec: drift,
   transition_sec: TRANSITION_SEC,
+  tail_sec: TAIL_SEC,
   sync_warnings,
 }} }}];"""
 }, 2)
@@ -1713,6 +2163,7 @@ ${(ctx.sync_windows || []).map((w) => {
   return [
     '--- CLIP ' + w.clip_number + ' | ' + w.timeline_label + ' | ' + w.narrative_beat + ' ---',
     'LOCKED REFERENCE IMAGE: ' + (w.reference_image_name || 'none'),
+    'ON SCREEN: the first ' + (w.render?.trim_end ?? w.vo_seconds) + 's of this clip. Everything after that is trimmed off and nobody ever sees it, so the whole move and the end frame have to land inside that window.',
     'Voiceover over this clip (' + w.vo_seconds + 's, external audio, nobody speaks on camera):',
     '  "' + (w.spoken_text || '') + '"',
     'Burned subtitle: same words, ' + w.vo_start + 's to ' + w.vo_end + 's',
@@ -1740,11 +2191,12 @@ SETTING: the room, its depth, what fills the background
 CAMERA: one continuous move — push in, slow dolly left, rack focus, static on a gimbal. One move per clip, no cutting inside the clip.
 LIGHT AND GRADE: source, direction, colour temperature, the grade named in the bible
 CONTINUITY: what carries over from the previous clip and must not change — wardrobe, machine model, time of day, grade
-END FRAME: the exact state of subject, camera and light on the last frame, so the next clip can pick it up
+END FRAME: the exact state of subject, camera and light at the end of the ON SCREEN window, so the next clip can pick it up
 AUDIO: silent or ambient room tone only. No dialogue, no narration, no music, no sound effects. Nobody speaks. The generated audio track is discarded and replaced by a separate voiceover, so any speech here is wasted and any on-camera talking will not match it.
 
 HOW TO WRITE THEM WELL
-- Describe motion that fills exactly {CLIP_SEC} seconds. One intention per clip. A clip that tries to show three things reads as none of them.
+- Flow always generates {CLIP_SEC} seconds, but the edit only keeps the ON SCREEN window stated in each brief, which is usually shorter. Pace the move to finish inside that window. A shot whose payoff lands at second nine when only the first six are used reads as a clip that goes nowhere.
+- One intention per clip. A clip that tries to show three things reads as none of them.
 - Write what the camera sees, in present tense, concrete nouns. No adjectives doing the work of a shot: "fluorescent light catching the glass door" beats "a beautiful scene".
 - Nobody talks to camera. No lip movement, no mouthing words, no piece to camera, no interview framing. The model you are writing for generates speech and lip-sync by default, and the reel carries a separate recorded voiceover — a mouth moving to different words is the one thing that makes the finished video look broken. If a person is in frame they are doing something with their hands, their body or their attention.
 - The five clips share one protagonist, one wardrobe, one location logic, one grade. CONTINUITY and END FRAME are how the cut survives.
@@ -1851,9 +2303,14 @@ const manifest = {
   voiceover_key: ctx.voiceover_key,
   subtitles_srt: ctx.subtitles_srt || '',
   sync_windows: ctx.sync_windows || [],
-  // Timing the render needs so the picture lands on the voiceover.
+  // Timing the render needs so the picture lands on the voiceover. The composer
+  // reprobes the mp3 and rescales against voiceover_sec, so it must travel too.
   voiceover_sec: ctx.voiceover_sec,
+  voiceover_duration_source: ctx.voiceover_duration_source,
+  caption_timing_source: ctx.caption_timing_source,
+  tts_provider: ctx.tts_provider,
   transition_sec: ctx.transition_sec,
+  tail_sec: ctx.tail_sec,
   render_plan: (ctx.sync_windows || []).map((w) => w.render),
   sync_warnings: ctx.sync_warnings || [],
   production_bible: ctx.script?.production_bible || {},
@@ -2121,11 +2578,18 @@ connect("Normalize Script Timing", "Load S3 Brand Images")
 connect("Load S3 Brand Images", "OpenRouter Match Images")
 connect("OpenRouter Match Images", "Parse Match Images")
 connect("Parse Match Images", "Prepare Voiceover")
-connect("Prepare Voiceover", "Cartesia TTS")
-connect("Cartesia TTS", "IF Cartesia OK")
-connect("IF Cartesia OK", "Prepare S3 Upload", 0)
-connect("IF Cartesia OK", "ElevenLabs TTS", 1)
-connect("ElevenLabs TTS", "Prepare S3 Upload")
+connect("Prepare Voiceover", "Cartesia TTS SSE")
+connect("Cartesia TTS SSE", "Parse Cartesia SSE")
+connect("Parse Cartesia SSE", "IF Cartesia SSE OK")
+connect("IF Cartesia SSE OK", "Prepare S3 Upload", 0)
+# Falls through to the plain mp3 endpoint, then to the other vendor.
+connect("IF Cartesia SSE OK", "Cartesia TTS Bytes", 1)
+connect("Cartesia TTS Bytes", "Mark Cartesia Bytes")
+connect("Mark Cartesia Bytes", "IF Cartesia Bytes OK")
+connect("IF Cartesia Bytes OK", "Prepare S3 Upload", 0)
+connect("IF Cartesia Bytes OK", "ElevenLabs TTS", 1)
+connect("ElevenLabs TTS", "Parse ElevenLabs TTS")
+connect("Parse ElevenLabs TTS", "Prepare S3 Upload")
 connect("Prepare S3 Upload", "S3 PUT Voiceover")
 connect("S3 PUT Voiceover", "S3 PUT Voiceover OK")
 connect("S3 PUT Voiceover OK", "Finalize Voiceover")

@@ -360,6 +360,14 @@ const body = {{
   run_id: ctx.run_id,
   clips: ctx.clips.map((c) => ({{ index: c.index, url: c.url, s3_key: c.s3_key }})),
   voiceover_url,
+  // The generator derived this from the mp3's byte size before the file was ever
+  // probed. The composer downloads the real thing, measures it, and rescales the
+  // plan if the two disagree — so it has to know what the plan assumed.
+  voiceover_sec: manifest.voiceover_sec,
+  // The director may pick a different crossfade than the plan assumed, and a
+  // longer one eats more of every clip. The composer needs both to correct it.
+  transition_sec: manifest.transition_sec,
+  tail_sec: manifest.tail_sec,
   subtitles_srt: manifest.subtitles_srt || '',
   recipe,
   output_key: `reels-final/${{ctx.run_id}}.mp4`,
@@ -419,7 +427,34 @@ if (job.status !== 'done') {{
   return [{{ json: {{ ...ctx, poll_again: true, poll_attempt, job_status: job.status }} }}];
 }}
 
-await deleteComposeSession.call(this, ctx.chat_id);
+// The composer checks the finished file before handing it over: length against
+// the voiceover it actually measured, one audio track, a 1080x1920 frame.
+const qc = job.qc || {{}};
+const qc_ok = qc.ok !== false;
+const problems = Array.isArray(qc.problems) ? qc.problems : [];
+
+// A reel that failed QC is still uploaded — but the session stays open so the
+// clips do not have to be sent again to try another render.
+if (qc_ok) await deleteComposeSession.call(this, ctx.chat_id);
+
+const header = qc_ok
+  ? 'Your reel is ready.'
+  : 'Your reel rendered, but it did not pass the final check. Look before you post it.';
+
+const lines = [
+  header,
+  `Run: ${{escapeHtml(ctx.run_id)}}`,
+  `Look: ${{escapeHtml(ctx.recipe?.style_name || 'default')}}`,
+  `Length: ${{(Number(job.duration_sec) || 0).toFixed(1)}}s against a ${{qc.voiceover_sec ?? ctx.manifest?.voiceover_sec ?? '?'}}s voiceover`,
+];
+// Only worth saying when the byte-size estimate turned out to be wrong.
+if (job.timing?.applied) lines.push(`Timing: ${{escapeHtml(job.timing.reason || '')}}`);
+if (!qc_ok) {{
+  lines.push('', 'PROBLEMS');
+  for (const p of problems) lines.push(`• ${{escapeHtml(p)}}`);
+  lines.push('', 'Send "done" again to re-render, or /cancel to drop the session.');
+}}
+lines.push('Download:', `<code>${{String(job.output_url || '').replace(/&/g, '&amp;')}}</code>`);
 
 return [{{ json: {{
   ...ctx,
@@ -427,14 +462,9 @@ return [{{ json: {{
   output_url: job.output_url,
   output_key: job.output_key,
   duration_sec: job.duration_sec,
-  reply_text: [
-    `Your reel is ready.`,
-    `Run: ${{escapeHtml(ctx.run_id)}}`,
-    `Look: ${{escapeHtml(ctx.recipe?.style_name || 'default')}}`,
-    `Length: ${{(Number(job.duration_sec) || 0).toFixed(1)}}s against a ${{ctx.manifest?.voiceover_sec ?? '?'}}s voiceover`,
-    `Download:`,
-    `<code>${{String(job.output_url || '').replace(/&/g, '&amp;')}}</code>`,
-  ].join('\\n'),
+  qc,
+  qc_ok,
+  reply_text: lines.join('\\n'),
 }} }}];
 """
 

@@ -9,8 +9,36 @@ import { uploadFile } from './s3.js';
 const PORT = Number(process.env.PORT || 3000);
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 const TMP_ROOT = process.env.TMP_ROOT || '/tmp/reels-composer';
+// Finished jobs are only kept so the workflow can poll for the result. It polls
+// for a few minutes at most, so anything this old is never going to be read.
+const JOB_TTL_MS = Number(process.env.JOB_TTL_MS) || 6 * 60 * 60 * 1000;
 
 const jobs = new Map();
+
+// One render at a time. ffmpeg is already tuned to sit inside this container's
+// memory limit for a single 1080x1920 encode — two at once is how the OOM
+// killer comes back. Requests are still accepted immediately and queued.
+let renderChain = Promise.resolve();
+let queueDepth = 0;
+
+function enqueueRender(task) {
+  queueDepth += 1;
+  const scheduled = renderChain.then(task, task);
+  renderChain = scheduled.then(
+    () => { queueDepth -= 1; },
+    () => { queueDepth -= 1; },
+  );
+  return scheduled;
+}
+
+const reaper = setInterval(() => {
+  const cutoff = Date.now() - JOB_TTL_MS;
+  for (const [id, job] of jobs) {
+    if (job.status !== 'done' && job.status !== 'failed') continue;
+    if (new Date(job.created_at).getTime() < cutoff) jobs.delete(id);
+  }
+}, 15 * 60 * 1000);
+reaper.unref?.();
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -34,6 +62,10 @@ app.get('/health', (_req, res) => {
       ok: code === 0,
       service: 'reels-composer',
       ffmpeg: code === 0 ? out.split('\n')[0] : 'not found',
+      queue_depth: queueDepth,
+      jobs_tracked: jobs.size,
+      // Renders die on the final upload without these, after doing all the work.
+      s3_configured: Boolean(process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY),
     });
   });
 });
@@ -49,6 +81,9 @@ app.post('/v1/render', auth, async (req, res) => {
     run_id: runId,
     clips,
     voiceover_url: voiceoverUrl,
+    voiceover_sec: voiceoverSec,
+    transition_sec: transitionSec,
+    tail_sec: tailSec,
     subtitles_srt: subtitlesSrt,
     recipe,
     callback_url: callbackUrl,
@@ -58,29 +93,38 @@ app.post('/v1/render', auth, async (req, res) => {
   if (!runId) return res.status(400).json({ error: 'run_id is required' });
   if (!Array.isArray(clips) || clips.length < 1) return res.status(400).json({ error: 'clips array is required' });
   if (!voiceoverUrl) return res.status(400).json({ error: 'voiceover_url is required' });
+  const missingUrl = clips.findIndex((c) => !(c && (c.url || typeof c === 'string')));
+  if (missingUrl >= 0) return res.status(400).json({ error: `clips[${missingUrl}] has no url` });
 
   const jobId = uuidv4();
   const job = {
     id: jobId,
     run_id: runId,
     status: 'queued',
+    queue_position: queueDepth,
     created_at: new Date().toISOString(),
     output_url: null,
     duration_sec: null,
+    qc: null,
     error: null,
   };
   jobs.set(jobId, job);
-  res.status(202).json({ job_id: jobId, status: 'queued' });
+  res.status(202).json({ job_id: jobId, status: 'queued', queue_position: job.queue_position });
 
-  setImmediate(async () => {
+  enqueueRender(async () => {
     const workDir = join(TMP_ROOT, jobId);
     job.status = 'processing';
+    job.queue_position = 0;
+    job.started_at = new Date().toISOString();
     try {
       await fs.mkdir(workDir, { recursive: true });
-      const { finalPath, duration } = await renderReel({
+      const { finalPath, duration, qc, timing } = await renderReel({
         workDir,
         clipUrls: clips,
         voiceoverUrl,
+        voiceoverSec,
+        transitionSec,
+        tailSec: tailSec == null ? undefined : Number(tailSec),
         subtitlesSrt,
         recipe,
       });
@@ -90,6 +134,12 @@ app.post('/v1/render', auth, async (req, res) => {
       job.output_url = outputUrl;
       job.output_key = key;
       job.duration_sec = duration;
+      // The reel is uploaded either way — a QC failure is something to look at,
+      // not a reason to throw away a finished render. It travels with the job so
+      // the workflow leads with the warning instead of announcing success.
+      job.qc = qc;
+      job.timing = timing;
+      job.finished_at = new Date().toISOString();
 
       if (callbackUrl) {
         try {
@@ -106,6 +156,7 @@ app.post('/v1/render', auth, async (req, res) => {
               output_url: outputUrl,
               output_key: key,
               duration_sec: duration,
+              qc,
             }),
           });
         } catch (cbErr) {
@@ -115,6 +166,7 @@ app.post('/v1/render', auth, async (req, res) => {
     } catch (err) {
       job.status = 'failed';
       job.error = err.message || String(err);
+      job.finished_at = new Date().toISOString();
       if (callbackUrl) {
         try {
           await fetch(callbackUrl, {

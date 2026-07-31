@@ -34,5 +34,16 @@ WORDS_MIN = WORDS_PER_CLIP - 3
 WORDS_MAX = WORDS_PER_CLIP + 1
 
 # ElevenLabs mp3_44100_128 and Cartesia mp3 @ 128000 are both constant bitrate,
-# so voiceover duration can be derived from the file size before render.
+# so voiceover duration can be derived from the file size before render. This is
+# now only a fallback: the primary path measures the audio directly, and the
+# composer reprobes whatever arrives.
 VOICEOVER_BITRATE = 128000
+
+# Cartesia only emits word timestamps on /tts/sse, and that endpoint refuses any
+# container but 'raw' — so the primary voiceover comes back as PCM that the
+# workflow wraps in a WAV header itself. Mono 16-bit at this rate is ~88 kB/s,
+# which is a 4.4 MB file for a 50-second reel: bigger than the mp3, and worth it
+# for captions cut to measured word boundaries instead of an estimate.
+VOICEOVER_SAMPLE_RATE = 44100
+VOICEOVER_BITS_PER_SAMPLE = 16
+VOICEOVER_CHANNELS = 1

@@ -61,6 +61,40 @@ export async function ffprobeDuration(filePath) {
   return Number(stdout.trim()) || 0;
 }
 
+// Structural read of the finished file. A reel that is the right length but has
+// two audio tracks, or came out 1080x1080, is still not shippable.
+export async function ffprobeStreams(filePath) {
+  const { stdout } = await run('ffprobe', [
+    '-v', 'error',
+    '-show_entries', 'stream=codec_type,width,height',
+    '-of', 'json',
+    filePath,
+  ]);
+  const streams = JSON.parse(stdout).streams || [];
+  const video = streams.find((s) => s.codec_type === 'video') || null;
+  return {
+    videoStreams: streams.filter((s) => s.codec_type === 'video').length,
+    audioStreams: streams.filter((s) => s.codec_type === 'audio').length,
+    width: video ? Number(video.width) : 0,
+    height: video ? Number(video.height) : 0,
+  };
+}
+
+// Burning subtitles needs an ffmpeg built with libass. Debian's ffmpeg package
+// has it; a stripped static build does not, and the filter is simply absent —
+// which surfaces as an unhelpful filtergraph parse error at the very last step,
+// after every clip has already been encoded. Checked once, up front.
+let filterCache = null;
+export async function ffmpegHasFilter(name) {
+  if (!filterCache) {
+    filterCache = run('ffmpeg', ['-hide_banner', '-filters'])
+      .then(({ stdout }) => stdout)
+      .catch(() => '');
+  }
+  const listing = await filterCache;
+  return new RegExp(`^\\s*\\S+\\s+${name}\\s`, 'm').test(listing);
+}
+
 function escapePath(p) {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''");
 }
@@ -80,6 +114,113 @@ function hexToAss(hex, fallback) {
   return `&H00${b}${g}${r}`;
 }
 
+// Greedy wrap, then re-wrap to the balanced width so the last line is never a
+// single stranded word. libass would wrap an over-long cue on its own, but it
+// picks the break point and routinely leaves "the" alone on line two.
+export function wrapCue(text, size) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  // Usable width is PlayResX minus the two 60px margins. Bold Arial averages
+  // about 0.55em per glyph, which is what decides how much fits on a line.
+  const perLine = Math.max(12, Math.floor(960 / ((Number(size) || 52) * 0.55)));
+
+  const wrap = (width) => {
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const next = line ? `${line} ${w}` : w;
+      if (next.length <= width || !line) { line = next; continue; }
+      lines.push(line);
+      line = w;
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+
+  const lines = wrap(perLine);
+  if (lines.length < 2) return lines.join('\\N');
+  // Greedy fills each line to the brim and leaves the remainder stranded — a
+  // cue reading "…eleven months" / "flat". Squeeze the width down to the
+  // narrowest that still needs the same number of lines, which spreads the
+  // words evenly across them.
+  const longestWord = words.reduce((n, w) => Math.max(n, w.length), 0);
+  let best = lines;
+  for (let width = longestWord; width < perLine; width++) {
+    const candidate = wrap(width);
+    if (candidate.length <= lines.length) { best = candidate; break; }
+  }
+  return best.join('\\N');
+}
+
+// Every cue time scales by the same factor, because the whole timeline is one
+// proportional split of a single voiceover. Used when the probed voiceover
+// turns out longer or shorter than the manifest predicted.
+export function scaleSrt(srt, scale) {
+  if (!(scale > 0) || Math.abs(scale - 1) < 1e-6) return srt;
+  return String(srt || '').replace(/(\d{2}):(\d{2}):(\d{2}),(\d{3})/g, (_m, h, m, s, ms) => {
+    const total = (Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000) * scale;
+    const hh = Math.floor(total / 3600);
+    const mm = Math.floor((total % 3600) / 60);
+    const ss = Math.floor(total % 60);
+    const mmm = Math.round((total - Math.floor(total)) * 1000);
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')},${String(mmm).padStart(3, '0')}`;
+  });
+}
+
+// Each clip is on screen for its share of the voiceover plus the overlap the
+// crossfade eats from it — the last clip carries a short tail instead.
+//
+// Two things can differ from what the generator planned, and both move the cut
+// off the words. The voiceover can turn out longer or shorter than the byte-size
+// estimate, which scales the speech share. And the render director is allowed to
+// pick a 250-400ms transition, while the plan was built assuming whatever
+// transition_sec the manifest recorded — a longer crossfade eats more of each
+// clip, so the reel finishes before the voiceover does. The overlap is a
+// constant of the edit and never scales; it is swapped, not stretched.
+export function rescalePerClip(perClip, options = {}) {
+  const {
+    scale = 1,
+    plannedTransitionSec = 0.3,
+    transitionSec = plannedTransitionSec,
+    tailSec = 0.25,
+  } = options;
+  if (!Array.isArray(perClip) || !(scale > 0)) return perClip;
+  const sameScale = Math.abs(scale - 1) < 1e-6;
+  const sameTransition = Math.abs(transitionSec - plannedTransitionSec) < 1e-6;
+  if (sameScale && sameTransition) return perClip;
+
+  const last = perClip.length - 1;
+  return perClip.map((p, i) => {
+    if (p.trim_end == null) return p;
+    const start = Math.max(0, Number(p.trim_start || 0));
+    const plannedOverlap = i === last ? tailSec : plannedTransitionSec;
+    const actualOverlap = i === last ? tailSec : transitionSec;
+    const voPart = Math.max(0, Number(p.trim_end) - start - plannedOverlap);
+    return { ...p, trim_end: Number((start + voPart * scale + actualOverlap).toFixed(3)) };
+  });
+}
+
+// The manifest's voiceover length is derived from the mp3's byte size, which an
+// ID3 tag or a provider quietly ignoring the requested bitrate can throw off.
+// Here the file is on disk and ffprobe has read it, so this is ground truth —
+// but a wild ratio means the plan belongs to a different run, and stretching
+// the edit to match would do more damage than leaving it alone.
+export function voiceoverScale(plannedSec, actualSec) {
+  const planned = Number(plannedSec) || 0;
+  const actual = Number(actualSec) || 0;
+  if (planned <= 0 || actual <= 0) {
+    return { scale: 1, applied: false, reason: 'no planned duration to compare against' };
+  }
+  const scale = actual / planned;
+  if (scale < 0.5 || scale > 2) {
+    return { scale: 1, applied: false, reason: `probed ${actual.toFixed(2)}s vs planned ${planned.toFixed(2)}s is too far apart to be the same voiceover — plan left as-is` };
+  }
+  if (Math.abs(scale - 1) < 0.01) {
+    return { scale: 1, applied: false, reason: 'planned duration matched the file' };
+  }
+  return { scale, applied: true, reason: `plan rescaled ${scale.toFixed(4)}x — voiceover is really ${actual.toFixed(2)}s, plan assumed ${planned.toFixed(2)}s` };
+}
+
 export function srtToAss(srt, style = {}) {
   const font = style.font || 'Arial';
   const size = style.size || 52;
@@ -97,9 +238,9 @@ export function srtToAss(srt, style = {}) {
     const timeLine = lines.find((l) => l.includes('-->'));
     if (!timeLine) continue;
     const [start, end] = timeLine.split('-->').map((s) => s.trim());
-    const text = lines.slice(lines.indexOf(timeLine) + 1).join(' ').trim();
+    const text = wrapCue(lines.slice(lines.indexOf(timeLine) + 1).join(' '), size);
     if (!text) continue;
-    events.push(`Dialogue: 0,${srtTimeToAss(start)},${srtTimeToAss(end)},Default,,0,0,0,,${text.replace(/\n/g, '\\N')}`);
+    events.push(`Dialogue: 0,${srtTimeToAss(start)},${srtTimeToAss(end)},Default,,0,0,0,,${text}`);
   }
   return `[Script Info]
 ScriptType: v4.00+
@@ -266,10 +407,92 @@ async function burnSubtitles(videoPath, assPath, outputPath) {
   ]);
 }
 
-export async function renderReel({ workDir, clipUrls, voiceoverUrl, subtitlesSrt, recipe }) {
+const QC_TOLERANCE_SEC = Number(process.env.QC_TOLERANCE_SEC) || 0.75;
+
+// The last gate before a reel is handed to anyone. Everything checked here is
+// something that has actually shipped broken at some point: a desynced cut, a
+// surviving clip audio track, a frame that is not 9:16.
+export function qcReel({ duration, voiceoverSec, streams, toleranceSec = QC_TOLERANCE_SEC }) {
+  const problems = [];
+  const drift = Number((Number(duration) - Number(voiceoverSec)).toFixed(3));
+
+  if (!(Number(duration) > 0)) {
+    problems.push('the rendered file has no duration');
+  } else if (Math.abs(drift) > toleranceSec) {
+    // -shortest ends the mux on whichever track runs out first, so a healthy
+    // reel lands on the voiceover. Short means the picture ran out first and
+    // the closing words were cut — the one failure that ruins the reel.
+    problems.push(drift < 0
+      ? `video ends ${Math.abs(drift).toFixed(2)}s before the voiceover — the closing words are cut off`
+      : `video runs ${drift.toFixed(2)}s past the voiceover — it ends on silence`);
+  }
+  if (streams.audioStreams !== 1) {
+    problems.push(`expected exactly 1 audio track (the voiceover), found ${streams.audioStreams}`);
+  }
+  if (streams.videoStreams !== 1) {
+    problems.push(`expected exactly 1 video track, found ${streams.videoStreams}`);
+  }
+  if (streams.width !== 1080 || streams.height !== 1920) {
+    problems.push(`expected a 1080x1920 vertical frame, got ${streams.width}x${streams.height}`);
+  }
+
+  return {
+    ok: problems.length === 0,
+    duration_sec: Number(Number(duration).toFixed(2)),
+    voiceover_sec: Number(Number(voiceoverSec).toFixed(2)),
+    drift_sec: drift,
+    problems,
+  };
+}
+
+export async function renderReel({
+  workDir,
+  clipUrls,
+  voiceoverUrl,
+  subtitlesSrt,
+  recipe,
+  voiceoverSec,
+  transitionSec: plannedTransitionSec,
+  tailSec = 0.25,
+}) {
   const r = normalizeRecipe(recipe);
   const order = (r.clip_order || [1, 2, 3, 4, 5]).map(Number);
   const clipMap = new Map((clipUrls || []).map((c) => [Number(c.index), c.url || c]));
+  const transitionMs = Number(r.transitions?.[0]?.duration_ms || 300);
+
+  const burningSubs = r.subtitles?.mode === 'burn' && Boolean(subtitlesSrt);
+  if (burningSubs && !(await ffmpegHasFilter('subtitles'))) {
+    throw new Error(
+      'This ffmpeg has no "subtitles" filter, so captions cannot be burned — it was built without libass. '
+      + 'Install a libass-enabled ffmpeg (Debian\'s ffmpeg package has it) or set subtitles.mode to "none".'
+    );
+  }
+
+  // The voiceover is what every other duration is measured against, so fetch and
+  // probe it before spending minutes in ffmpeg: a dead link fails in seconds,
+  // and the plan gets corrected against the real file rather than the byte-size
+  // estimate the generator made before the mp3 existed.
+  // The primary TTS path returns PCM the workflow wraps as WAV; the fallbacks
+  // return mp3. ffmpeg probes content rather than the name, but keeping the
+  // real extension makes a work directory readable when a render is debugged.
+  const voiceExt = (String(voiceoverUrl).split('?')[0].match(/\.(wav|mp3|m4a|aac|flac|ogg)$/i) || [, 'mp3'])[1];
+  const voicePath = join(workDir, `voiceover.${voiceExt.toLowerCase()}`);
+  await downloadToFile(voiceoverUrl, voicePath);
+  const voiceoverActualSec = await ffprobeDuration(voicePath);
+  if (!voiceoverActualSec) {
+    throw new Error('Voiceover downloaded but ffprobe found no duration — the file is not playable audio.');
+  }
+
+  const timing = voiceoverScale(voiceoverSec, voiceoverActualSec);
+  const perClip = rescalePerClip(r.per_clip, {
+    scale: timing.scale,
+    // Fall back to the transition being rendered, which makes this a no-op —
+    // an older manifest without transition_sec is left exactly as it was.
+    plannedTransitionSec: Number(plannedTransitionSec) > 0 ? Number(plannedTransitionSec) : transitionMs / 1000,
+    transitionSec: transitionMs / 1000,
+    tailSec,
+  });
+  const srt = scaleSrt(subtitlesSrt, timing.scale);
 
   const normalized = [];
   for (const index of order) {
@@ -278,30 +501,36 @@ export async function renderReel({ workDir, clipUrls, voiceoverUrl, subtitlesSrt
     const rawPath = join(workDir, `clip-${index}-raw.mp4`);
     const normPath = join(workDir, `clip-${index}-norm.mp4`);
     await downloadToFile(url, rawPath);
-    const spec = r.per_clip.find((p) => Number(p.index) === index) || { index, trim_start: 0 };
+    const spec = perClip.find((p) => Number(p.index) === index) || { index, trim_start: 0 };
     const actual = await ffprobeDuration(rawPath);
     await normalizeClip(rawPath, normPath, fitToFootage(spec, actual), r.color);
+    // Raw footage is the biggest thing on disk and is finished with once the
+    // normalized copy exists; a small container should not hold five of them.
+    await fs.rm(rawPath, { force: true });
     normalized.push(normPath);
   }
 
-  const transitionMs = Number(r.transitions?.[0]?.duration_ms || 300);
   const concatPath = join(workDir, 'concat.mp4');
   await concatClips(normalized, concatPath, transitionMs);
 
-  const voicePath = join(workDir, 'voiceover.mp3');
-  await downloadToFile(voiceoverUrl, voicePath);
   const withAudioPath = join(workDir, 'with-audio.mp4');
   await muxVoiceover(concatPath, voicePath, withAudioPath, r.audio);
 
   let finalPath = withAudioPath;
-  if (r.subtitles?.mode === 'burn' && subtitlesSrt) {
+  if (r.subtitles?.mode === 'burn' && srt) {
     const assPath = join(workDir, 'subs.ass');
-    await fs.writeFile(assPath, srtToAss(subtitlesSrt, r.subtitles), 'utf8');
+    await fs.writeFile(assPath, srtToAss(srt, r.subtitles), 'utf8');
     const subsPath = join(workDir, 'final.mp4');
     await burnSubtitles(withAudioPath, assPath, subsPath);
     finalPath = subsPath;
   }
 
   const duration = await ffprobeDuration(finalPath);
-  return { finalPath, duration };
+  const qc = qcReel({
+    duration,
+    voiceoverSec: voiceoverActualSec,
+    streams: await ffprobeStreams(finalPath),
+  });
+
+  return { finalPath, duration, qc, timing };
 }
