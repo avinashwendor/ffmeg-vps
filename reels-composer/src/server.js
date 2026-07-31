@@ -65,7 +65,11 @@ app.get('/health', (_req, res) => {
       queue_depth: queueDepth,
       jobs_tracked: jobs.size,
       // Renders die on the final upload without these, after doing all the work.
-      s3_configured: Boolean(process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY),
+      // Railway names them AWS_*; accept either S3_* or AWS_* naming.
+      s3_configured: Boolean(
+        (process.env.S3_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID) &&
+        (process.env.S3_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY)
+      ),
     });
   });
 });
