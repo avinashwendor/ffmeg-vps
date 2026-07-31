@@ -6,6 +6,19 @@ reels-composer/node_modules/
 __pycache__/
 *.pyc
 
+# Local secrets (optional — or use env vars)
+build/secrets_local.py
+
+# Generated n8n workflows. The builder inlines the OpenRouter, Tavily,
+# ElevenLabs, Cartesia and S3 keys straight into the Code nodes, so these files
+# are secrets. Rebuild with `python3 build/build_workflow.py`.
+automations/**/*.json
+working_automations/
+
+# Local scratch: old workflow exports and paste-into-n8n snippets, several of
+# which still have live keys pasted into them.
+archive/
+
 # Local test artifacts
 .tmp-test/
 
@@ -17,6 +30,3 @@ __pycache__/
 # Logs
 *.log
 npm-debug.log*
-
-# Local secrets (never commit)
-build_secrets_local.py

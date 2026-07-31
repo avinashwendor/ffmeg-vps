@@ -51,7 +51,7 @@ function presignGetUrl(key) {
   const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, createHash('sha256').update(canonicalRequest).digest('hex')].join('\n');
   const signature = hmacSha256(getSigningKey(dateStamp), stringToSign).toString('hex');
-  return `https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`.replace(/_/g, '%5F');
+  return `https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`;
 }
 
 function presignPutUrl(key, contentType) {
@@ -77,7 +77,7 @@ function presignPutUrl(key, contentType) {
   const credentialScope = `${dateStamp}/${REGION}/s3/aws4_request`;
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, createHash('sha256').update(canonicalRequest).digest('hex')].join('\n');
   const signature = hmacSha256(getSigningKey(dateStamp), stringToSign).toString('hex');
-  return `https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`.replace(/_/g, '%5F');
+  return `https://${host}/${encodePath(key)}?${query}&X-Amz-Signature=${signature}`;
 }
 
 async function downloadToFile(url, destPath) {

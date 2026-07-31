@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { downloadToFile } from './s3.js';
 
 function run(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -37,11 +38,19 @@ function srtTimeToAss(t) {
   return `${h}:${m}:${s}.${cs}`;
 }
 
+// ASS wants &HAABBGGRR — blue and red swapped relative to hex, alpha first.
+function hexToAss(hex, fallback) {
+  const m = String(hex || '').trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return fallback;
+  const [r, g, b] = [0, 2, 4].map((i) => m[1].slice(i, i + 2).toUpperCase());
+  return `&H00${b}${g}${r}`;
+}
+
 export function srtToAss(srt, style = {}) {
   const font = style.font || 'Arial';
   const size = style.size || 52;
-  const primary = style.color || '#FFFFFF';
-  const outline = style.outline_color || '#000000';
+  const primary = hexToAss(style.color, '&H00FFFFFF');
+  const outline = hexToAss(style.outline_color, '&H00000000');
   const blocks = String(srt || '').trim().split(/\n\n+/);
   const events = [];
   for (const block of blocks) {
@@ -60,12 +69,12 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,40,40,120,1
+Style: Default,${font},${size},${primary},&H000000FF,${outline},&H80000000,-1,0,0,0,100,100,0,0,1,3,1,2,40,40,120,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 ${events.join('\n')}
-`.replace('#FFFFFF', primary).replace('#000000', outline);
+`;
 }
 
 function defaultRecipe() {
@@ -102,7 +111,10 @@ async function normalizeClip(inputPath, outputPath, clipSpec, color) {
   const con = Number(color.contrast || 1);
   const bri = Number(color.brightness || 0);
 
+  // setpts has to live in this same chain: -filter:v and -vf are aliases, so
+  // passing both silently drops the first one and the clip plays at 1x.
   const vf = [
+    speed !== 1 ? `setpts=PTS/${speed}` : null,
     `scale=1080:1920:force_original_aspect_ratio=increase`,
     `crop=1080:1920`,
     zoom !== 1 ? `scale=iw*${zoom}:ih*${zoom},crop=1080:1920` : null,
@@ -112,11 +124,11 @@ async function normalizeClip(inputPath, outputPath, clipSpec, color) {
   ].filter(Boolean).join(',');
 
   const args = ['-y', '-ss', String(trimStart)];
-  if (trimEnd != null && trimEnd > trimStart) args.push('-to', String(trimEnd));
-  args.push('-i', inputPath);
-  if (speed !== 1) args.push('-filter:v', `setpts=PTS/${speed}`, '-an');
-  else args.push('-an');
-  args.push('-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', outputPath);
+  // -t (duration) rather than -to, so the window is unambiguous once -ss has
+  // already moved the input position.
+  if (trimEnd != null && trimEnd > trimStart) args.push('-t', String(trimEnd - trimStart));
+  args.push('-i', inputPath, '-an', '-vf', vf);
+  args.push('-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p', outputPath);
   await run('ffmpeg', args);
 }
 
@@ -160,7 +172,9 @@ async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
 
   const dur = await ffprobeDuration(videoPath);
   const fadeOutStart = Math.max(0, dur - fadeOut);
-  const af = `volume=${voGain}dB,afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}`;
+  const af = voGain === 0
+    ? `afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}`
+    : `volume=${voGain}dB,afade=t=in:st=0:d=${fadeIn},afade=t=out:st=${fadeOutStart}:d=${fadeOut}`;
 
   await run('ffmpeg', [
     '-y', '-i', videoPath, '-i', voicePath,
