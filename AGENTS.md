@@ -110,6 +110,17 @@ Note that the generated workflow JSON embeds these keys in plain text — treat
 `avinashwendor/ffmeg-vps` (Railway builds the root `Dockerfile` on push to
 `main`). `GET /health` reports ffmpeg's version.
 
+### Required Railway service variables
+
+`S3_ACCESS_KEY` and `S3_SECRET_KEY` **must** be set on the Railway service, to
+the same values as `RAILWAY_S3_ACCESS_KEY` / `RAILWAY_S3_SECRET_KEY` in
+`build/secrets_local.py`. `src/s3.js` defaults them to `''`, so without them
+every render finishes the whole ffmpeg pipeline and then dies on the final
+upload with `InvalidAccessKeyId`. The other S3 variables have working defaults.
+
+Optional: `AUTH_TOKEN` (pair with `COMPOSER_AUTH_TOKEN` in
+`build/secrets_local.py`), `FFMPEG_THREADS`, `FFMPEG_PRESET`, `FFMPEG_CRF`.
+
 Two bugs fixed in `reels-composer/src/renderJob.js` that both failed silently:
 
 - `downloadToFile` was used without being imported, so **every** render failed
@@ -120,6 +131,14 @@ Two bugs fixed in `reels-composer/src/renderJob.js` that both failed silently:
 
 Also: subtitle colours are now converted to ASS `&HBBGGRR` instead of a
 find-and-replace that never matched, and trims use `-t` rather than `-to`.
+
+A third failure was environmental. Any render of two or more clips died with a
+null exit code — the container OOM killer. ffmpeg sizes its thread pools from
+the host's core count, not the container's memory limit, so x264 held
+(threads + lookahead) 1080x1920 frames in flight during the xfade step, where
+two streams decode at once. One clip fit, two did not. Threads and lookahead
+are now capped; a null exit reports the OOM plainly instead of dumping raw
+progress output.
 
 ## n8n notes
 
