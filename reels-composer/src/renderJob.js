@@ -242,6 +242,10 @@ async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
     `afade=t=out:st=${fadeOutStart}:d=${fadeOut}`,
   ].filter(Boolean).join(',');
 
+  // Explicit maps are the second guarantee that no clip audio reaches the reel:
+  // video comes from the concat, audio only ever from the voiceover file. The
+  // first guarantee is -an in normalizeClip, which strips each clip's generated
+  // dialogue before it is ever seen again. Do not replace these with defaults.
   await run('ffmpeg', [
     '-y', '-i', videoPath, '-i', voicePath,
     '-map', '0:v:0', '-map', '1:a:0',

@@ -1741,12 +1741,12 @@ CAMERA: one continuous move — push in, slow dolly left, rack focus, static on 
 LIGHT AND GRADE: source, direction, colour temperature, the grade named in the bible
 CONTINUITY: what carries over from the previous clip and must not change — wardrobe, machine model, time of day, grade
 END FRAME: the exact state of subject, camera and light on the last frame, so the next clip can pick it up
-AUDIO: ambient room tone only, no dialogue, no music, no narration — voiceover is added later
+AUDIO: silent or ambient room tone only. No dialogue, no narration, no music, no sound effects. Nobody speaks. The generated audio track is discarded and replaced by a separate voiceover, so any speech here is wasted and any on-camera talking will not match it.
 
 HOW TO WRITE THEM WELL
 - Describe motion that fills exactly {CLIP_SEC} seconds. One intention per clip. A clip that tries to show three things reads as none of them.
 - Write what the camera sees, in present tense, concrete nouns. No adjectives doing the work of a shot: "fluorescent light catching the glass door" beats "a beautiful scene".
-- Nobody speaks on camera and no mouth is in sync with anything. If a person is in frame they are doing something with their hands, their body or their attention.
+- Nobody talks to camera. No lip movement, no mouthing words, no piece to camera, no interview framing. The model you are writing for generates speech and lip-sync by default, and the reel carries a separate recorded voiceover — a mouth moving to different words is the one thing that makes the finished video look broken. If a person is in frame they are doing something with their hands, their body or their attention.
 - The five clips share one protagonist, one wardrobe, one location logic, one grade. CONTINUITY and END FRAME are how the cut survives.
 - The voiceover in the brief is the argument being made over the picture. Do not have the picture repeat it literally — support it.
 

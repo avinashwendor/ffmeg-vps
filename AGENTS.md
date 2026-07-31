@@ -140,6 +140,20 @@ two streams decode at once. One clip fit, two did not. Threads and lookahead
 are now capped; a null exit reports the OOM plainly instead of dumping raw
 progress output.
 
+## Only the voiceover is ever heard
+
+Gemini Omni generates speech, effects and lip movement with every clip. None of
+it reaches the reel, guarded twice: `-an` on `normalizeClip` strips each clip's
+audio on the first pass, and `muxVoiceover` maps `0:v:0` and `1:a:0` explicitly
+so audio can only come from the voiceover file. `reels-composer/test/audio_isolation.test.mjs`
+renders clips with a loud tone baked in and asserts none of it survives — run it
+if you touch either.
+
+The picture side is prompt-only and cannot be enforced in code: the Flow prompt
+forbids talking to camera, because a mouth moving to words the voiceover is not
+saying is what makes a reel look broken. If clips come back with people
+speaking, that instruction is what needs tightening.
+
 ## n8n notes
 
 - Telegram Trigger needs **Download ON** or clip uploads arrive with no binary.
