@@ -14,6 +14,7 @@ WORKDIR /app
 COPY reels-composer/package.json ./
 RUN npm install --omit=dev
 COPY reels-composer/src ./src
+COPY reels-composer/assets ./assets
 
 ENV NODE_ENV=production
 ENV PORT=3000

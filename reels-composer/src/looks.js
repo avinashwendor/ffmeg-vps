@@ -316,35 +316,38 @@ export function scaleCues(cues, scale) {
 export const CAPTION_PRESETS = {
   clean_bold: {
     font: 'Arial', size: 52, color: '#FFFFFF', outline_color: '#000000',
-    highlight_color: '#FFD54A', animation: 'none', position: 'bottom',
+    highlight_color: '#FFD54A', animation: 'none', position: 'lower',
   },
   soft_fade: {
     font: 'Helvetica', size: 50, color: '#FFFFFF', outline_color: '#101010',
-    highlight_color: '#FFFFFF', animation: 'fade', position: 'bottom',
+    highlight_color: '#FFFFFF', animation: 'fade', position: 'lower',
   },
   pop_punch: {
     font: 'Arial', size: 58, color: '#FFFFFF', outline_color: '#000000',
-    highlight_color: '#FFE24A', animation: 'pop', position: 'bottom', all_caps: true,
+    highlight_color: '#FFE24A', animation: 'pop', position: 'lower', all_caps: true,
   },
   rise_clean: {
     font: 'Verdana', size: 52, color: '#FFFFFF', outline_color: '#000000',
-    highlight_color: '#FFFFFF', animation: 'rise', position: 'bottom',
+    highlight_color: '#FFFFFF', animation: 'rise', position: 'lower',
   },
   karaoke_gold: {
     font: 'Arial', size: 56, color: '#FFFFFF', outline_color: '#000000',
-    highlight_color: '#FFC53D', animation: 'karaoke', position: 'bottom', all_caps: true,
+    highlight_color: '#FFC53D', animation: 'karaoke', position: 'lower', all_caps: true,
   },
   karaoke_mint: {
     font: 'Helvetica', size: 54, color: '#FFFFFF', outline_color: '#06231C',
-    highlight_color: '#3DF5B0', animation: 'karaoke', position: 'bottom',
+    highlight_color: '#3DF5B0', animation: 'karaoke', position: 'lower',
   },
+  // The one preset allowed to sit mid-frame: a single word IS the shot, so it
+  // reads as a deliberate design rather than a caption that has drifted off
+  // its usual place. See the position clamp below — this is the only route in.
   word_punch: {
     font: 'Impact', size: 84, color: '#FFFFFF', outline_color: '#000000',
     highlight_color: '#FFE24A', animation: 'word', position: 'center', all_caps: true,
   },
   boxed_news: {
     font: 'Arial', size: 48, color: '#FFFFFF', outline_color: '#000000',
-    highlight_color: '#FFFFFF', animation: 'fade', position: 'bottom', box: true,
+    highlight_color: '#FFFFFF', animation: 'fade', position: 'lower', box: true,
   },
 };
 
@@ -353,9 +356,12 @@ export const CAPTION_ANIMATIONS = ['none', 'fade', 'pop', 'rise', 'karaoke', 'wo
 
 // Reels and Shorts overlay the caption, handle and action buttons across the
 // bottom of the frame. At 1920 tall that furniture eats roughly the lowest
-// 320px, so a subtitle sitting at 120 is covered on the exact device people
-// watch this on.
-const POSITION_MARGIN_V = { bottom: 340, lower: 480, center: 840, upper: 1180 };
+// 320px, so `bottom` is the closest a cue can sit to the edge without being
+// covered on the exact device people watch this on. `lower` is the normal
+// caption position — a proper lower-third, not glued to the edge and nowhere
+// near the middle of the frame. `center` and `upper` exist only for the
+// word-punch style; see the clamp below.
+const POSITION_MARGIN_V = { bottom: 340, lower: 420, center: 840, upper: 1180 };
 
 export function resolveCaptionStyle(subtitles = {}) {
   const presetName = String(subtitles.preset || subtitles.style || '').toLowerCase();
@@ -366,7 +372,22 @@ export function resolveCaptionStyle(subtitles = {}) {
   }
   let animation = String(merged.animation || 'none').toLowerCase();
   if (!CAPTION_ANIMATIONS.includes(animation)) animation = 'none';
-  const position = POSITION_MARGIN_V[String(merged.position || 'bottom').toLowerCase()] ? merged.position : 'bottom';
+  let position = POSITION_MARGIN_V[String(merged.position || 'lower').toLowerCase()]
+    ? String(merged.position).toLowerCase()
+    : 'lower';
+  // A normal multi-word caption floating mid-frame or up near the top reads as
+  // broken, not stylistic — that space belongs to word-punch alone, where one
+  // big word fills the shot on purpose. Anything else is pulled back to the
+  // lower third regardless of what was asked for.
+  if (animation !== 'word' && (position === 'center' || position === 'upper')) {
+    position = 'lower';
+  }
+  let margin_v = Math.round(num(merged.margin_v, POSITION_MARGIN_V[position] || 340));
+  // An explicit margin_v override could still smuggle a normal caption up
+  // toward the middle even after the position clamp above — cap it to the
+  // same lower-third band so that route is closed too.
+  if (animation !== 'word') margin_v = Math.min(620, Math.max(300, margin_v));
+
   return {
     preset: CAPTION_PRESETS[presetName] ? presetName : 'clean_bold',
     font: String(merged.font || 'Arial'),
@@ -376,8 +397,8 @@ export function resolveCaptionStyle(subtitles = {}) {
     outline_color: merged.outline_color || '#000000',
     highlight_color: merged.highlight_color || merged.color || '#FFFFFF',
     animation,
-    position: String(position).toLowerCase(),
-    margin_v: Math.round(num(merged.margin_v, POSITION_MARGIN_V[String(position).toLowerCase()] || 340)),
+    position,
+    margin_v,
     all_caps: Boolean(merged.all_caps),
     box: Boolean(merged.box),
   };

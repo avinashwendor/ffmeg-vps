@@ -104,6 +104,22 @@ console.log('\ncaption styles');
   check('an unknown preset falls back to the plain one', resolveCaptionStyle({ preset: 'disco' }).preset === 'clean_bold');
   check('an unknown animation falls back to none', resolveCaptionStyle({ animation: 'explode' }).animation === 'none');
   check('a caption too big for the frame is clamped', resolveCaptionStyle({ size: 400 }).size <= 110);
+
+  // Every preset now sits in the lower third by default — this is what
+  // actually fixes captions reading as hovering mid-frame.
+  const defaultMargin = resolveCaptionStyle({ preset: 'clean_bold' }).margin_v;
+  check('the default position is the lower third, not the very edge and not the middle', defaultMargin === 420, defaultMargin);
+
+  // "center"/"upper" only belong to word-punch, where one big word fills the
+  // shot on purpose. A normal caption asked to float mid-frame — whether by a
+  // bad preset choice or a bad override — is pulled back down, both by name
+  // and by an explicit margin_v that tries to sneak past the name change.
+  const wanderingCenter = resolveCaptionStyle({ preset: 'clean_bold', position: 'center' });
+  check('a normal caption cannot be placed mid-frame by name', wanderingCenter.position === 'lower', wanderingCenter.position);
+  const wanderingMargin = resolveCaptionStyle({ preset: 'clean_bold', margin_v: 900 });
+  check('nor by an explicit margin_v that tries to reach the middle', wanderingMargin.margin_v <= 620, wanderingMargin.margin_v);
+  const wordPunchCenter = resolveCaptionStyle({ preset: 'word_punch' });
+  check('word-punch keeps its center placement — that one is deliberate', wordPunchCenter.position === 'center', wordPunchCenter.position);
 }
 
 console.log('\ncaption rendering');
@@ -132,7 +148,7 @@ const cues = [
 
   const plain = buildAss(normalizeCues([], srt), { preset: 'clean_bold' });
   check('a plain caption carries no override tags', !plain.includes('{\\'), plain.split('\n').find((l) => l.startsWith('Dialogue')));
-  check('captions sit above the Reels furniture', /MarginV|,340,1/.test(plain) && plain.includes(',340,1'));
+  check('captions sit in the lower third, clear of the Reels furniture', plain.includes(',420,1'), plain.split('\n').find((l) => l.startsWith('Style:')));
 
   const pop = buildAss(normalizeCues([], srt), { preset: 'pop_punch' });
   check('a pop caption scales in and settles', pop.includes('\\fscx76') && pop.includes('\\t(130,210'));
@@ -153,7 +169,7 @@ const cues = [
   check('the last word holds to the end of the cue', dialogues[4].includes('0:00:03.00'), dialogues[4]);
 
   const rise = buildAss(normalizeCues([], srt), { preset: 'rise_clean' });
-  check('a rising caption moves up into place', rise.includes('\\move(540,1626,540,1580,0,200)'), rise.split('\n').find((l) => l.startsWith('Dialogue')));
+  check('a rising caption moves up into place', rise.includes('\\move(540,1546,540,1500,0,200)'), rise.split('\n').find((l) => l.startsWith('Dialogue')));
 
   const boxed = buildAss(normalizeCues([], srt), { preset: 'boxed_news' });
   check('a boxed caption uses an opaque box border style', /Style: Default,[^\n]*,3,4,2,/.test(boxed));

@@ -337,6 +337,41 @@ developer machines lack; the ASS *files* are still validated by having ffprobe
 read each preset back (the ass demuxer is separate from the libass-backed
 `subtitles` filter).
 
+**Caption position** is `lower` by default on every preset — a proper lower
+third, not glued to the very bottom edge and nowhere near the middle of the
+frame. `bottom` (closer to the edge) and `center`/`upper` also exist as margin
+values, but `center`/`upper` are reachable only through the `word` animation
+(`word_punch`): a caption that floats mid-frame or near the top reads as broken
+for ordinary dialogue captions, so `resolveCaptionStyle` clamps both the named
+position *and* an explicit `margin_v` override back into the lower third for
+every animation except `word`. The render director's prompt no longer offers
+`position` as something to set — every preset already sits where it should.
+
+## The brand mark
+
+`reels-composer/assets/wendor-logo.png` — the wordmark, not just the icon —
+sits top-right on **every** reel. This is brand identity, not a creative
+choice, so it is deliberately kept out of the director's prompt entirely:
+there is no way for a model to turn it off, only `recipe.branding.enabled:
+false` can, as a manual escape hatch for a one-off export.
+
+`finishVideo()` in `renderJob.js` combines the caption burn and the logo
+overlay into one `filter_complex` and one re-encode — captions and the mark are
+two overlays on the same frame, not two passes. The overlay scales the logo to
+`LOGO_WIDTH` (260px) and positions it `LOGO_MARGIN_X`/`LOGO_MARGIN_TOP` from the
+top-right corner, using `scale=...:-2` rather than `-1` so the intermediate
+frame height is always even.
+
+The asset is baked into the Docker image at build time (`COPY
+reels-composer/assets ./assets` in both Dockerfiles) and resolved once per
+process via `findLogo()` — a missing asset degrades the render rather than
+failing it (`look.branding = { applied: false, reason: ... }`), and the
+Telegram reply says so, but only when it did *not* apply; a working watermark
+is silent, same as everything else in this report.
+`reels-composer/test/sync_qc.test.mjs` renders for real and samples the actual
+pixels in the top-right corner and a control point elsewhere, so this is
+checked against the rendered file, not just the return value.
+
 ## Posting the reel
 
 The finished reel goes back to Telegram as a **video**, not a link — n8n

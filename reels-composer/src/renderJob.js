@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { downloadToFile } from './s3.js';
 import {
   buildAss,
@@ -16,6 +17,7 @@ import {
 } from './looks.js';
 
 export { wrapCue, buildAss, normalizeCues, scaleCues, pickTransitions, motionFilter } from './looks.js';
+export { LOGO_WIDTH, LOGO_MARGIN_X, LOGO_MARGIN_TOP };
 
 // ffmpeg sizes its thread pools from the *host* core count, not the container's
 // memory limit. On a big host that means x264 keeps (threads + lookahead)
@@ -212,6 +214,10 @@ function defaultRecipe() {
     // Rotates the default motion and cut sequences so two runs of the same
     // script do not come back as the same edit.
     look_seed: 0,
+    // Not part of the "look" — this is brand identity, not a creative choice,
+    // so it is never described to the render director. `enabled: false` exists
+    // purely as a manual override for a one-off unbranded export.
+    branding: { enabled: true },
   };
 }
 
@@ -259,6 +265,7 @@ export function normalizeRecipe(recipe) {
     motion: Array.isArray(recipe.motion) ? recipe.motion : base.motion,
     finish: { ...base.finish, ...(recipe.finish || {}) },
     look_seed: Number(recipe.look_seed) || base.look_seed,
+    branding: { ...base.branding, ...(recipe.branding || {}) },
   };
 }
 
@@ -356,11 +363,69 @@ async function muxVoiceover(videoPath, voicePath, outputPath, audioSpec) {
   ]);
 }
 
-async function burnSubtitles(videoPath, assPath, outputPath) {
-  const vf = `subtitles='${escapePath(assPath)}'`;
+// ── BRAND WATERMARK ─────────────────────────────────────────────────────────
+//
+// The wendor mark sits top-right on every reel, always, with no way for a
+// director prompt or a bad recipe to turn it off by accident — it is a brand
+// requirement, not a creative choice, so it never goes near the JSON the model
+// fills in. `recipe.branding.enabled` exists only as a manual escape hatch.
+const LOGO_WIDTH = 260;
+const LOGO_MARGIN_X = 40;
+// Top-right is clear of the caption/handle/button furniture Reels and Shorts
+// draw across the *bottom* of the frame, so the mark does not need the same
+// safe-zone math the captions do — just enough margin to clear a status bar.
+const LOGO_MARGIN_TOP = 84;
+
+function defaultLogoPath() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return join(here, '..', 'assets', 'wendor-logo.png');
+}
+
+// Baked into the Docker image at build time, so this is a fixed answer for the
+// life of the process — resolved once and cached, not re-checked per render.
+let logoPathCache;
+export async function findLogo() {
+  if (logoPathCache !== undefined) return logoPathCache;
+  const path = process.env.WENDOR_LOGO_PATH || defaultLogoPath();
+  try {
+    await fs.access(path);
+    logoPathCache = path;
+  } catch {
+    logoPathCache = null;
+  }
+  return logoPathCache;
+}
+
+// Subtitles and the logo are two different overlays on the same frame, and
+// each is its own full re-encode — so they are combined into one filter graph
+// and one encode rather than run as two passes back to back. Called only when
+// at least one of assPath/logoPath is set.
+async function finishVideo(videoPath, outputPath, { assPath, logoPath }) {
+  const inputs = ['-i', videoPath];
+  const filterParts = [];
+  let videoLabel = '0:v';
+
+  if (assPath) {
+    filterParts.push(`[${videoLabel}]subtitles='${escapePath(assPath)}'[subbed]`);
+    videoLabel = 'subbed';
+  }
+  if (logoPath) {
+    const logoInputIndex = inputs.length / 2;
+    inputs.push('-i', logoPath);
+    // -2 rather than -1: the auto-computed height must come out even, or some
+    // ffmpeg builds reject the intermediate frame once it is composited onto
+    // a yuv420p output.
+    filterParts.push(`[${logoInputIndex}:v]scale=${LOGO_WIDTH}:-2[logo]`);
+    filterParts.push(`[${videoLabel}][logo]overlay=x=W-w-${LOGO_MARGIN_X}:y=${LOGO_MARGIN_TOP}[branded]`);
+    videoLabel = 'branded';
+  }
+
   await run('ffmpeg', [
-    '-y', ...filterThreadArgs(), '-i', videoPath,
-    '-vf', vf,
+    '-y', ...filterThreadArgs(),
+    ...inputs,
+    '-filter_complex', filterParts.join(';'),
+    '-map', `[${videoLabel}]`,
+    '-map', '0:a',
     ...encodeArgs(),
     '-c:a', 'copy',
     outputPath,
@@ -497,13 +562,22 @@ export async function renderReel({
   await muxVoiceover(concatPath, voicePath, withAudioPath, r.audio);
 
   const captionStyle = resolveCaptionStyle(r.subtitles);
-  let finalPath = withAudioPath;
+  const wantsBranding = r.branding?.enabled !== false;
+  const logoPath = wantsBranding ? await findLogo() : null;
+
+  let assPath = null;
   if (burningSubs) {
-    const assPath = join(workDir, 'subs.ass');
+    assPath = join(workDir, 'subs.ass');
     await fs.writeFile(assPath, buildAss(scaledCues, r.subtitles), 'utf8');
-    const subsPath = join(workDir, 'final.mp4');
-    await burnSubtitles(withAudioPath, assPath, subsPath);
-    finalPath = subsPath;
+  }
+
+  // Captions and the logo are two overlays on the same frame — combined into
+  // one filter graph so a branded, captioned reel costs one re-encode, not two.
+  let finalPath = withAudioPath;
+  if (assPath || logoPath) {
+    const finishedPath = join(workDir, 'final.mp4');
+    await finishVideo(withAudioPath, finishedPath, { assPath, logoPath });
+    finalPath = finishedPath;
   }
 
   const duration = await ffprobeDuration(finalPath);
@@ -524,6 +598,9 @@ export async function renderReel({
       : 'pop',
     caption_words_measured: cues.some((c) => c.words?.length),
     finish: r.finish,
+    branding: wantsBranding
+      ? { applied: Boolean(logoPath), reason: logoPath ? null : 'wendor-logo.png was not found on the composer service — check the Docker image includes reels-composer/assets/' }
+      : { applied: false, reason: 'disabled for this render' },
   };
 
   return { finalPath, duration, qc, timing, look };

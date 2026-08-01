@@ -309,9 +309,11 @@ Return ONE valid JSON object with exactly these keys:
                    - pop_punch and rise_clean animate per line and always work.
                    - clean_bold and boxed_news are the restrained options.
                    You may override any of font, size, color, outline_color,
-                   highlight_color, position ("bottom" | "lower" | "center"),
-                   all_caps. Sizes are 44-64, or up to 96 for word_punch.
-                   Hex colours, high contrast, readable over any frame.
+                   highlight_color, all_caps. Sizes are 44-64, or up to 96 for
+                   word_punch. Hex colours, high contrast, readable over any
+                   frame. Leave position alone — every preset already sits in
+                   the lower third, which is where a caption belongs; nothing
+                   here should ever float mid-frame or near the top.
 
   color            {{ saturation, contrast, brightness }}
                    saturation 0.9-1.25, contrast 0.95-1.2, brightness -0.05-0.05
@@ -610,6 +612,11 @@ if (Array.isArray(look.transitions) && look.transitions.length) {{
 if (look.caption_animation) {{
   const measured = look.caption_words_measured ? 'on measured words' : 'per line';
   lines.push(`Captions: ${{escapeHtml(look.caption_preset || '')}} — ${{escapeHtml(look.caption_animation)}} ${{measured}}`);
+}}
+// Silent when it worked, same as everything else here — the brand mark is
+// only worth a line when it did *not* make it onto the reel.
+if (look.branding && look.branding.applied === false && look.branding.reason !== 'disabled for this render') {{
+  lines.push(`Heads up: brand logo was not applied — ${{escapeHtml(look.branding.reason || 'unknown reason')}}.`);
 }}
 // Only worth saying when the byte-size estimate turned out to be wrong.
 if (job.timing?.applied) lines.push(`Timing: ${{escapeHtml(job.timing.reason || '')}}`);

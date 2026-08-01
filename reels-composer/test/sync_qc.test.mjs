@@ -29,6 +29,10 @@ import {
   rescalePerClip,
   voiceoverScale,
   ffmpegHasFilter,
+  findLogo,
+  LOGO_WIDTH,
+  LOGO_MARGIN_X,
+  LOGO_MARGIN_TOP,
 } from '../src/renderJob.js';
 
 // Burning captions needs an ffmpeg built with libass. Production has one; a
@@ -55,6 +59,27 @@ function sh(cmd, args) {
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { err += d; });
     p.on('close', (code) => (code === 0 ? resolve({ out, err }) : reject(new Error(err.slice(-600)))));
+  });
+}
+
+// The average colour of a small crop, so the tests can prove the wendor mark
+// actually lands where the constants say it does — not just that ffmpeg
+// exited 0. No image library needed: crop to raw rgb24 and average the bytes.
+function averageColor(videoPath, { x, y, w, h, atSec = 1 }) {
+  return new Promise((resolve, reject) => {
+    const p = spawn('ffmpeg', ['-nostdin', '-v', 'error', '-ss', String(atSec), '-i', videoPath,
+      '-frames:v', '1', '-vf', `crop=${w}:${h}:${x}:${y},format=rgb24`, '-f', 'rawvideo', '-']);
+    const chunks = [];
+    let err = '';
+    p.stdout.on('data', (d) => chunks.push(d));
+    p.stderr.on('data', (d) => { err += d; });
+    p.on('close', (code) => {
+      if (code !== 0) { reject(new Error(err.slice(-400))); return; }
+      const buf = Buffer.concat(chunks);
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i + 2 < buf.length; i += 3) { r += buf[i]; g += buf[i + 1]; b += buf[i + 2]; n += 1; }
+      resolve(n ? { r: r / n, g: g / n, b: b / n } : { r: 0, g: 0, b: 0 });
+    });
   });
 }
 
@@ -309,7 +334,7 @@ try {
 
     const workDir = join(dir, 'animated');
     await fs.mkdir(workDir, { recursive: true });
-    const { qc, look } = await renderReel({
+    const { finalPath, qc, look } = await renderReel({
       workDir,
       clipUrls,
       voiceoverUrl: `${base}/honest.wav`,
@@ -341,6 +366,56 @@ try {
     check('the reel still passes QC with all of it applied', qc.ok, JSON.stringify(qc.problems));
     // The whole point of keeping motion out of the timing code.
     check('a move on every clip does not shift the reel off the voiceover', Math.abs(qc.drift_sec) < 0.4, `drift ${qc.drift_sec}s`);
+
+    // The wendor mark is meant to be on every reel with no way to forget it —
+    // prove it actually lands in the file, not just that look.branding says so.
+    const logoOnDisk = await findLogo();
+    check('the composer found a logo asset to brand with', Boolean(logoOnDisk), logoOnDisk);
+    check('and reports the branding as applied', look.branding?.applied === true, JSON.stringify(look.branding));
+
+    if (logoOnDisk) {
+      // Square icon is the left edge of the wordmark; sample well inside its
+      // red field — left of the "W" cut-out and clear of the rounded corner —
+      // so the point is red regardless of how LOGO_WIDTH is tuned later.
+      const iconW = Math.round(LOGO_WIDTH * (409 / 1909));
+      const sampleX = 1080 - LOGO_WIDTH - LOGO_MARGIN_X + Math.round(iconW * 0.18);
+      const sampleY = LOGO_MARGIN_TOP + Math.round(iconW * 0.42);
+      const onLogo = await averageColor(finalPath, { x: sampleX, y: sampleY, w: 14, h: 14 });
+      check('the top-right corner is the wendor red, not the blue test footage',
+        onLogo.r > 150 && onLogo.r - onLogo.b > 60, JSON.stringify(onLogo));
+
+      // A point just past the logo's left edge, same row, should be plain
+      // footage — proves the mark is a small corner overlay, not a full-frame
+      // tint or a filter that landed in the wrong place.
+      const besideLogo = await averageColor(finalPath, { x: 40, y: sampleY, w: 14, h: 14 });
+      check('everywhere else is untouched by the mark', besideLogo.r - besideLogo.b < 40, JSON.stringify(besideLogo));
+    }
+  }
+
+  console.log('\nrender: the brand mark can be turned off for a one-off export');
+  {
+    const workDir = join(dir, 'unbranded');
+    await fs.mkdir(workDir, { recursive: true });
+    const { finalPath, look } = await renderReel({
+      workDir,
+      clipUrls,
+      voiceoverUrl: `${base}/honest.wav`,
+      voiceoverSec: 12,
+      transitionSec: TRANSITION_SEC,
+      tailSec: TAIL_SEC,
+      subtitlesSrt: srtFor(12),
+      recipe: {
+        per_clip: planFor(12),
+        subtitles: { mode: 'none' },
+        branding: { enabled: false },
+      },
+    });
+    check('branding reports as off, not as missing', JSON.stringify(look.branding) === JSON.stringify({ applied: false, reason: 'disabled for this render' }), JSON.stringify(look.branding));
+    const iconW = Math.round(LOGO_WIDTH * (409 / 1909));
+    const sampleX = 1080 - LOGO_WIDTH - LOGO_MARGIN_X + Math.round(iconW * 0.18);
+    const sampleY = LOGO_MARGIN_TOP + Math.round(iconW * 0.42);
+    const corner = await averageColor(finalPath, { x: sampleX, y: sampleY, w: 14, h: 14 });
+    check('and the corner is plain footage, not the mark', corner.r - corner.b < 40, JSON.stringify(corner));
   }
 
   console.log('\nrender: an ffmpeg that cannot burn captions says so up front');
