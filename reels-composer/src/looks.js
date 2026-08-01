@@ -382,11 +382,14 @@ export function resolveCaptionStyle(subtitles = {}) {
   if (animation !== 'word' && (position === 'center' || position === 'upper')) {
     position = 'lower';
   }
-  let margin_v = Math.round(num(merged.margin_v, POSITION_MARGIN_V[position] || 340));
-  // An explicit margin_v override could still smuggle a normal caption up
-  // toward the middle even after the position clamp above — cap it to the
-  // same lower-third band so that route is closed too.
-  if (animation !== 'word') margin_v = Math.min(620, Math.max(300, margin_v));
+  // For every animation except word-punch, margin_v is *derived*, not taken
+  // from the input at all — a clamped ceiling still left room for a caption to
+  // read as "floating" rather than "in the lower third". The director's prompt
+  // does not ask for margin_v, but nothing stops a model from including it
+  // anyway, and a loophole that is merely narrow is still a loophole.
+  const margin_v = animation === 'word'
+    ? Math.round(num(merged.margin_v, POSITION_MARGIN_V[position] || 340))
+    : POSITION_MARGIN_V[position];
 
   return {
     preset: CAPTION_PRESETS[presetName] ? presetName : 'clean_bold',

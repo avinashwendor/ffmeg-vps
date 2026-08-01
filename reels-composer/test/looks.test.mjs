@@ -116,8 +116,10 @@ console.log('\ncaption styles');
   // and by an explicit margin_v that tries to sneak past the name change.
   const wanderingCenter = resolveCaptionStyle({ preset: 'clean_bold', position: 'center' });
   check('a normal caption cannot be placed mid-frame by name', wanderingCenter.position === 'lower', wanderingCenter.position);
+  // Not just capped — ignored outright. A ceiling still left a normal caption
+  // able to read as "floating" instead of "in the lower third".
   const wanderingMargin = resolveCaptionStyle({ preset: 'clean_bold', margin_v: 900 });
-  check('nor by an explicit margin_v that tries to reach the middle', wanderingMargin.margin_v <= 620, wanderingMargin.margin_v);
+  check('nor by an explicit margin_v at all — it is derived, not honoured', wanderingMargin.margin_v === 420, wanderingMargin.margin_v);
   const wordPunchCenter = resolveCaptionStyle({ preset: 'word_punch' });
   check('word-punch keeps its center placement — that one is deliberate', wordPunchCenter.position === 'center', wordPunchCenter.position);
 }
