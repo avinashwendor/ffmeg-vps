@@ -44,6 +44,13 @@ function fromBase64(b64) {{
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }}
+function toBase64(bytes) {{
+  const u8 = toBytes(bytes);
+  if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
+  let bin = '';
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return btoa(bin);
+}}
 function rotr(n, x) {{ return (x >>> n) | (x << (32 - n)); }}
 const SHA_K = new Uint32Array([
   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -132,14 +139,36 @@ function encodePath(key) {{
 function hostName() {{
   return `${{BUCKET}}.${{ENDPOINT_HOST}}`;
 }}
+function decodeBufferJson(value) {{
+  if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {{
+    return new TextDecoder().decode(Uint8Array.from(value.data));
+  }}
+  return null;
+}}
 function readHttpText(res) {{
   if (res == null) return '';
   if (typeof res === 'string') return res;
+  const direct = decodeBufferJson(res);
+  if (direct != null) return direct;
   if (typeof res.body === 'string') return res.body;
   if (typeof res.data === 'string') return res.data;
+  const bodyBuf = decodeBufferJson(res.body);
+  if (bodyBuf != null) return bodyBuf;
+  const dataBuf = decodeBufferJson(res.data);
+  if (dataBuf != null) return dataBuf;
   if (typeof Buffer !== 'undefined' && res.body && Buffer.isBuffer(res.body)) return res.body.toString('utf8');
   if (typeof Buffer !== 'undefined' && res.data && Buffer.isBuffer(res.data)) return res.data.toString('utf8');
   return '';
+}}
+function parseS3JsonText(text) {{
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  const outer = JSON.parse(trimmed);
+  if (outer && outer.type === 'Buffer' && Array.isArray(outer.data)) {{
+    const inner = new TextDecoder().decode(Uint8Array.from(outer.data));
+    return JSON.parse(inner);
+  }}
+  return outer;
 }}
 async function s3Request(method, host, path, headers, body) {{
   const options = {{
@@ -170,14 +199,19 @@ function describeS3Error(err) {{
   return `HTTP ${{status || 'error'}}: ${{err.message || err}}`;
 }}
 async function putObject(key, body, contentType = 'application/octet-stream') {{
-  const bytes = toBytes(body);
   const uploadUrl = presignPutUrl(key);
+  const requestBody = typeof body === 'string'
+    ? body
+    : (() => {{
+      const bytes = toBytes(body);
+      return typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes;
+    }})();
   try {{
     await this.helpers.httpRequest({{
       method: 'PUT',
       url: uploadUrl,
       headers: {{ 'Content-Type': contentType }},
-      body: typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes,
+      body: requestBody,
       json: false,
     }});
   }} catch (err) {{
@@ -270,7 +304,7 @@ async function loadLinkedInSession(chatId) {
     const raw = await this.helpers.httpRequest({ method: 'GET', url, json: false, timeout: 30000 });
     const text = readHttpText(raw);
     if (!text || !text.trim()) return null;
-    const session = JSON.parse(text);
+    const session = parseS3JsonText(text);
     if (!session?.run_id || session.deleted) return null;
     return session;
   } catch {
@@ -387,6 +421,155 @@ READ_TELEGRAM_REPLY_JS = """function readTelegramReply(input) {
   const j = input?.json || {};
   return String(j.data?.text || j.message?.text || j.result?.text || j.text || '').trim();
 }"""
+
+
+def telegram_compose_js(bot_token: str = "") -> str:
+    """Telegram media detection + binary download for compose clip uploads.
+
+    n8n Cloud stores trigger downloads in filesystem mode — Code nodes must call
+    getBinaryDataBuffer(), not read item.binary.data directly. When that fails,
+    fall back to Telegram getFile + direct download using the bot token.
+    """
+    return f"""function detectTelegramVideo(msg) {{
+  const m = msg || {{}};
+  if (m.video?.file_id) {{
+    return {{
+      kind: 'video',
+      file_id: m.video.file_id,
+      file_name: m.video.file_name || '',
+      mime_type: m.video.mime_type || 'video/mp4',
+    }};
+  }}
+  if (m.document?.file_id && /^video\\//i.test(String(m.document.mime_type || ''))) {{
+    return {{
+      kind: 'document',
+      file_id: m.document.file_id,
+      file_name: m.document.file_name || '',
+      mime_type: m.document.mime_type || 'video/mp4',
+    }};
+  }}
+  if (m.animation?.file_id) {{
+    return {{
+      kind: 'animation',
+      file_id: m.animation.file_id,
+      file_name: m.animation.file_name || 'animation.mp4',
+      mime_type: m.animation.mime_type || 'video/mp4',
+    }};
+  }}
+  return null;
+}}
+
+async function readInputBinaryBytes(itemIndex, keys) {{
+  const item = $input.first();
+  const names = (keys && keys.length) ? keys : ['data'];
+  for (const name of names) {{
+    try {{
+      const buf = await this.helpers.getBinaryDataBuffer(itemIndex ?? 0, name);
+      if (buf && buf.length) {{
+        return {{
+          bytes: buf instanceof Uint8Array ? buf : new Uint8Array(buf),
+          binaryKey: name,
+          fileName: item.binary?.[name]?.fileName || '',
+        }};
+      }}
+    }} catch (_) {{}}
+  }}
+  const binary = item.binary || {{}};
+  for (const name of names) {{
+    const raw = binary[name];
+    if (!raw) continue;
+    if (typeof raw.data === 'string') {{
+      try {{
+        return {{ bytes: fromBase64(raw.data), binaryKey: name, fileName: raw.fileName || '' }};
+      }} catch (_) {{}}
+    }}
+    if (raw.data?.type === 'Buffer' && Array.isArray(raw.data.data)) {{
+      return {{ bytes: Uint8Array.from(raw.data.data), binaryKey: name, fileName: raw.fileName || '' }};
+    }}
+    if (raw.data instanceof Uint8Array) {{
+      return {{ bytes: raw.data, binaryKey: name, fileName: raw.fileName || '' }};
+    }}
+  }}
+  return null;
+}}
+
+async function downloadTelegramFileById(fileId) {{
+  const token = {json.dumps(bot_token or "")};
+  if (!token) {{
+    // Only reached once the Telegram Download Clip node and the trigger's own
+    // download have both come back empty, so name those first — a bot token is
+    // the last resort here, not the fix.
+    throw new Error(
+      'neither the Telegram Download Clip node nor the trigger returned the file. ' +
+      'Check that the Telegram credential is set on the Telegram Download Clip node and that ' +
+      'Download is ON in the Telegram Trigger. (A TELEGRAM_BOT_TOKEN in build/secrets_local.py ' +
+      'adds one more fallback.)'
+    );
+  }}
+  const meta = await this.helpers.httpRequest({{
+    method: 'GET',
+    url: `https://api.telegram.org/bot${{token}}/getFile?file_id=${{encodeURIComponent(fileId)}}`,
+    json: true,
+    timeout: 60000,
+  }});
+  const filePath = meta?.result?.file_path;
+  if (!filePath) throw new Error(`Telegram getFile failed: ${{JSON.stringify(meta).slice(0, 200)}}`);
+  const body = await this.helpers.httpRequest({{
+    method: 'GET',
+    url: `https://api.telegram.org/file/bot${{token}}/${{filePath}}`,
+    json: false,
+    encoding: 'arraybuffer',
+    timeout: 120000,
+  }});
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(body)) return new Uint8Array(body);
+  if (body && typeof body === 'object' && body.type === 'Buffer' && Array.isArray(body.data)) {{
+    return Uint8Array.from(body.data);
+  }}
+  throw new Error('Telegram file download returned an unexpected body type');
+}}
+
+async function loadTelegramVideoBytes(itemIndex, msg) {{
+  const media = detectTelegramVideo(msg);
+  const fromInput = await readInputBinaryBytes.call(this, itemIndex, ['data', 'video', 'document', 'animation']);
+  if (fromInput?.bytes?.length) {{
+    return {{ ...fromInput, source: 'trigger', media }};
+  }}
+  if (media?.file_id) {{
+    const bytes = await downloadTelegramFileById.call(this, media.file_id);
+    return {{
+      bytes,
+      binaryKey: 'data',
+      fileName: media.file_name || '',
+      source: 'telegram_api',
+      media,
+    }};
+  }}
+  throw new Error(
+    'No video on this message. Send an mp4 as a video or file (albums and forwards are fine). ' +
+    'Photos, links, and voice notes are not clips.'
+  );
+}}"""
+
+
+def resolve_telegram_chat_js(static_key: str, fallback_chat_id: str = "") -> str:
+    """Resolve Telegram chat_id: message → workflow staticData → build-time fallback."""
+    return f"""function resolveTelegramChatId(json, staticData) {{
+  const direct = String(json?.chat_id || json?.message?.chat?.id || '').trim();
+  if (direct && direct !== 'undefined') {{
+    staticData[{json.dumps(static_key)}] = direct;
+    return direct;
+  }}
+  const saved = String(staticData?.[{json.dumps(static_key)}] || '').trim();
+  if (saved && saved !== 'undefined') return saved;
+  const fallback = {json.dumps(fallback_chat_id or "")};
+  if (fallback) return fallback;
+  throw new Error(
+    'No Telegram chat_id. Message this bot with /start from YOUR personal Telegram account ' +
+    '(get your numeric ID from @userinfobot — never the bot\\'s own ID). ' +
+    'Or set TELEGRAM_CHAT_ID in build/secrets_local.py and rebuild the workflow.'
+  );
+}}"""
 
 
 class WorkflowBuilder:

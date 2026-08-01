@@ -27,28 +27,64 @@ HARNESS = r"""
 const BUCKET = new Map();
 let COMPOSER_PAYLOAD = null;
 let COMPOSER_JOB = null;
+let PUBLISH_PAYLOAD = null;
+let PUBLISH_JOB = null;
 const failures = [];
 const key = (url) => decodeURIComponent(new URL(url).pathname.replace(/^\//, ''));
 
 const helpers = { httpRequest: async (o) => {
+  if (o.url.includes('api.telegram.org')) {
+    if (o.url.includes('/getFile')) return { ok: true, result: { file_path: 'videos/clip.mp4' } };
+    // Minimal valid-looking mp4 for looksLikeMp4 (needs ftyp + length >= 12).
+    return Buffer.concat([
+      Buffer.from([0, 0, 0, 8, 0x66, 0x74, 0x79, 0x70]),
+      Buffer.from('isom0000'),
+    ]);
+  }
   if (o.url.includes('openrouter.ai')) { OPENROUTER_REQUEST = o.body; return { choices: [{ message: { content: OPENROUTER_REPLY } }] }; }
   if (o.url.includes('/v1/render')) { COMPOSER_PAYLOAD = o.body; return { job_id: 'job-1', status: 'queued' }; }
   if (o.url.includes('/v1/jobs/')) return COMPOSER_JOB;
+  if (o.url.includes('/v1/publish/')) return PUBLISH_JOB;
+  if (o.url.includes('/v1/publish')) {
+    PUBLISH_PAYLOAD = o.body;
+    return { publish_job_id: 'pub-1', status: 'queued', targets: { instagram: true, youtube: true } };
+  }
   const k = key(o.url);
-  if (o.method === 'PUT') { BUCKET.set(k, Buffer.isBuffer(o.body) ? o.body.toString('utf8') : String(o.body)); return ''; }
+  if (o.method === 'PUT') {
+    const payload = Buffer.isBuffer(o.body) ? o.body : String(o.body);
+    BUCKET.set(k, payload);
+    return '';
+  }
+  if (o.method === 'DELETE') { BUCKET.delete(k); return ''; }
   if (o.url.includes('list-type=2')) {
     const prefix = new URL(o.url).searchParams.get('prefix') || '';
     const keys = [...BUCKET.keys()].filter((x) => x.startsWith(prefix));
-    return `<R>${keys.map((x) => `<Key>${x}</Key>`).join('')}</R>`;
+    // Real S3 returns each object inside <Contents> with its <Size>; the clip
+    // handling now reads sizes, so a zero-byte upload can be told apart from
+    // one that finished.
+    return `<R>${keys.map((x) => {
+      const v = BUCKET.get(x);
+      const size = Buffer.isBuffer(v) ? v.length : Buffer.byteLength(String(v));
+      return `<Contents><Key>${x}</Key><Size>${size}</Size></Contents>`;
+    }).join('')}</R>`;
   }
   if (!BUCKET.has(k)) { const e = new Error('NoSuchKey'); e.statusCode = 404; throw e; }
   return BUCKET.get(k);
+},
+getBinaryDataBuffer: async (_itemIndex, binaryPropertyName) => {
+  const raw = INPUT?.binary?.[binaryPropertyName];
+  if (!raw) throw new Error(`no binary property ${binaryPropertyName}`);
+  if (typeof raw.data === 'string') return Buffer.from(raw.data, 'base64');
+  if (raw.data?.type === 'Buffer') return Buffer.from(raw.data.data);
+  throw new Error('binary property has no inline data');
 }};
 
 let OPENROUTER_REPLY = '{}';
 let OPENROUTER_REQUEST = null;
 let INPUT = null;
 const $input = { first: () => INPUT };
+const STATIC_DATA = {};
+const $getWorkflowStaticData = () => STATIC_DATA;
 
 // Nodes that read an earlier step by name, e.g. $('Prepare Voiceover').
 let NODE_CONTEXT = {};
@@ -59,9 +95,25 @@ async function runNode(name, item) {
   const $json = item.json || {};
   const body = NODES[name];
   if (body == null) throw new Error(`no such node: ${name}`);
-  const fn = new Function('$input', '$json', 'helpers', '$',
+  const fn = new Function('$input', '$json', 'helpers', '$', '$getWorkflowStaticData',
     '"use strict"; return (async function(){ ' + body + '\n}).call({ helpers });');
-  return await fn($input, $json, helpers, $);
+  return await fn($input, $json, helpers, $, $getWorkflowStaticData);
+}
+
+async function runClipUpload(item) {
+  // In the workflow a Telegram file node sits between the classifier and this
+  // one, so Prepare reads the message back by node name rather than from its
+  // own input. Mirror that here or the harness tests a shape that no longer
+  // exists.
+  NODE_CONTEXT['Classify Compose Message'] = item;
+  const prep = await runNode('Prepare Clip S3 Upload', item);
+  const row = prep[0];
+  if (!row.json.upload_url) return prep;
+  const bin = row.binary?.clip;
+  if (!bin?.data) throw new Error('clip binary missing from prepare');
+  await helpers.httpRequest({ method: 'PUT', url: row.json.upload_url, body: Buffer.from(bin.data, 'base64') });
+  NODE_CONTEXT['Prepare Clip S3 Upload'] = row;
+  return runNode('Finalize Clip Upload', { json: row.json });
 }
 
 function check(label, actual, expected) {
@@ -337,30 +389,134 @@ async function main() {
   check('a session is opened', BUCKET.has('reels-compose-sessions/9.json'), true);
   check('the reply explains the naming rule', start[0].json.reply_text.includes('clip1.mp4'), true);
 
+  // n8n task runner sometimes persists JSON as {type:'Buffer',data:[...]} on S3.
+  const wrapped = JSON.stringify({ type: 'Buffer', data: [...Buffer.from(BUCKET.get('reels-compose-sessions/9.json'))] });
+  BUCKET.set('reels-compose-sessions/9.json', wrapped);
+  const statusWrapped = await runNode('Handle Status Cancel', { json: { chat_id: '9', compose_action: 'status' } });
+  check('buffer-wrapped sessions on S3 still load', statusWrapped[0].json.reply_text.includes('Clips: 0/5'), true);
+
   let unknown = null;
   try { await runNode('Handle Compose Start', { json: { chat_id: '9', run_id: 'ghost' } }); }
   catch (e) { unknown = e.message; }
   check('an unknown run id fails loudly', String(unknown).includes('Manifest not found'), true);
 
-  const fake = Buffer.from('mp4').toString('base64');
-  const send = (msgId, fileName, caption) => runNode('Handle Clip Upload WF1', {
-    json: { chat_id: '9', clip_file_name: fileName, caption_index: caption ?? null, message: { message_id: msgId, chat: { id: 9 } } },
+  const fakeMp4 = Buffer.concat([
+    Buffer.from([0, 0, 0, 8, 0x66, 0x74, 0x79, 0x70]),
+    Buffer.from('isom0000'),
+  ]);
+  const fake = fakeMp4.toString('base64');
+  const send = (msgId, fileName, caption, extra = {}) => runClipUpload({
+    json: {
+      chat_id: '9',
+      clip_file_name: fileName,
+      caption_index: caption ?? null,
+      message: { message_id: msgId, chat: { id: 9 }, video: { file_id: `vid-${msgId}`, file_name: fileName }, ...extra },
+    },
     binary: { data: { mimeType: 'video/mp4', fileName, data: fake } },
   });
 
+  const forwarded = await runClipUpload({
+    json: {
+      chat_id: '9',
+      clip_file_name: 'fwd.mp4',
+      caption_index: null,
+      clip_file_id: 'doc-22',
+      message: {
+        message_id: 22,
+        chat: { id: 9 },
+        forward_origin: { type: 'user' },
+        document: { file_id: 'doc-22', file_name: 'fwd.mp4', mime_type: 'video/mp4' },
+      },
+    },
+    binary: { data: { mimeType: 'video/mp4', fileName: 'fwd.mp4', data: fake } },
+  });
+  check('a forwarded video sent as a document still saves', forwarded[0].json.reply_text.includes('saved from'), true);
+
+  // Which slot a clip took is read back from the bucket now, not from the
+  // session — so wipe both when resetting, or the old clips stay "arrived".
+  const resetRun = () => {
+    for (const k of [...BUCKET.keys()]) {
+      if (k.startsWith('reels-clips/R1/') || k.startsWith('reels-compose-claims/')) BUCKET.delete(k);
+    }
+    BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({
+      state: 'collecting', run_id: 'R1', chat_id: '9',
+      started_at: Date.now(), expires_at: Date.now() + 3600000, manifest,
+    }));
+  };
+  const storedClips = () => [...BUCKET.keys()].filter((k) => /^reels-clips\/R1\/clip-\d+\.mp4$/.test(k)).sort();
+
+  resetRun();
   for (const [id, n] of [[11, 3], [12, 1], [13, 5], [14, 2], [15, 4]]) await send(id, `R1-clip${n}.mp4`);
-  let session = JSON.parse(BUCKET.get('reels-compose-sessions/9.json'));
-  session.clips.sort((a, b) => a.index - b.index);
   check('clips sent out of order land in the right slots',
-    session.clips.map((c) => c.s3_key),
+    storedClips(),
     [1, 2, 3, 4, 5].map((i) => `reels-clips/R1/clip-0${i}.mp4`));
-  check('every slot was resolved from the filename', session.clips.every((c) => c.index_source === 'filename'), true);
 
   const again = await send(11, 'R1-clip3.mp4');
   check('resending a message does not duplicate it', again[0].json.reply_text.includes('already saved'), true);
 
   const status = await runNode('Handle Status Cancel', { json: { chat_id: '9', compose_action: 'status' } });
-  check('status reports a full set', status[0].json.reply_text.includes('Clips: 5/5'), true);
+  check('status is read from storage, not from a session field', status[0].json.reply_text.includes('Clips: 5/5'), true);
+
+  // ---- the clip upload failures that actually happened --------------------
+  console.log('\nclip ordering and upload recovery');
+
+  // A generated export name ends in a hex digit often enough that reading it as
+  // a clip number silently reorders the reel. "Whisk_a1b2c3.mp4" is not clip 3.
+  resetRun();
+  OPENROUTER_REPLY = JSON.stringify({ slot: null, confidence: 0, why: 'a hash' });
+  const hashed = await send(30, 'Whisk_a1b2c3.mp4');
+  check('a hashed export name is not read as a clip number', hashed[0].json.reply_text.includes('from filename'), false);
+  check('it falls through to the next free slot instead', hashed[0].json.reply_text.includes('Clip 1/5'), true);
+
+  // Flow names downloads after the prompt, so a name with no number in it still
+  // says which scene it is. The model gets asked when the name has no number.
+  resetRun();
+  OPENROUTER_REPLY = JSON.stringify({ slot: 4, confidence: 0.82, why: 'lobby browsing' });
+  const named = await send(31, 'people browsing chips office lobby.mp4');
+  check('a name with no number is read by the model', named[0].json.reply_text.includes('Clip 4/5'), true);
+  check('and the reply says why it went there', named[0].json.reply_text.includes('name reads as'), true);
+  check('the model was given only the free slots', JSON.parse(OPENROUTER_REQUEST.messages[1].content).free_slots, [1, 2, 3, 4, 5]);
+
+  // A low-confidence guess is worse than no guess: it puts the reel out of
+  // order, where the next free slot at least fills in.
+  OPENROUTER_REPLY = JSON.stringify({ slot: 2, confidence: 0.2, why: 'not sure' });
+  const unsure = await send(32, 'Whisk_9f8e7d6c.mp4');
+  check('a guess the model is not confident about is not used', unsure[0].json.reply_text.includes('next free slot'), true);
+
+  // Two clips both claiming slot 1 is the album race that lost files. Neither
+  // may win twice, and nothing may be dropped.
+  resetRun();
+  await send(41, 'clip1.mp4');
+  const collided = await send(42, 'clip1.mp4');
+  check('a second clip claiming a taken slot still gets saved', collided[0].json.reply_text.includes('saved from'), true);
+  check('and it lands somewhere else, not on top of the first', storedClips().length, 2);
+  check('the reply says the slot was taken', collided[0].json.reply_text.includes('was taken'), true);
+
+  // The PUT can report success and leave nothing behind. Saying "saved" then is
+  // exactly how a render ends up a clip short with nobody warned.
+  resetRun();
+  NODE_CONTEXT['Classify Compose Message'] = { json: {
+    chat_id: '9', clip_file_name: 'clip2.mp4', clip_file_id: 'vid-51',
+    message: { message_id: 51, chat: { id: 9 }, video: { file_id: 'vid-51', file_name: 'clip2.mp4' } },
+  }, binary: { data: { mimeType: 'video/mp4', fileName: 'clip2.mp4', data: fake } } };
+  const prepped = (await runNode('Prepare Clip S3 Upload', NODE_CONTEXT['Classify Compose Message']))[0];
+  NODE_CONTEXT['Prepare Clip S3 Upload'] = prepped;
+  // ...and deliberately do not PUT anything.
+  const lost = (await runNode('Finalize Clip Upload', { json: prepped.json }))[0].json;
+  check('an upload that never landed is not reported as saved', lost.reply_text.includes('did not finish uploading'), true);
+  check('and the slot is handed back so a resend can use it',
+    [...BUCKET.keys()].some((k) => k.startsWith('reels-compose-claims/9/R1/')), false);
+
+  // A zero-byte object is a dead PUT wearing the costume of a finished one.
+  resetRun();
+  BUCKET.set('reels-clips/R1/clip-03.mp4', Buffer.alloc(0));
+  const zeroStatus = await runNode('Handle Status Cancel', { json: { chat_id: '9', compose_action: 'status' } });
+  check('a zero-byte clip does not count as arrived', zeroStatus[0].json.reply_text.includes('Clips: 0/5'), true);
+
+  // Put a real set back for the render tests below.
+  resetRun();
+  for (const [id, n] of [[61, 1], [62, 2], [63, 3], [64, 4], [65, 5]]) await send(id, `R1-clip${n}.mp4`);
+  check('a full set is ready for the render', storedClips().length, 5);
 
   // ---- render -------------------------------------------------------------
   console.log('\nrender');
@@ -392,12 +548,27 @@ async function main() {
   BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({ run_id: 'R1', clips: [], manifest }));
   COMPOSER_JOB = { status: 'done', output_url: 'https://b/final.mp4', output_key: 'reels-final/R1.mp4',
     duration_sec: ON_BUDGET_SEC, qc: { ok: true, duration_sec: ON_BUDGET_SEC, voiceover_sec: ON_BUDGET_SEC, drift_sec: 0.02, problems: [] },
+    look: { motions: ['push_in', 'pan_right', 'pull_out', 'push_left', 'rise'],
+      transitions: ['smoothleft', 'fade', 'circleopen', 'dissolve'],
+      caption_preset: 'karaoke_gold', caption_animation: 'karaoke', caption_words_measured: true },
     timing: { applied: true, reason: 'plan rescaled 1.0400x' } };
   const passed = (await runNode('Poll Render Job', { json: { chat_id: '9', run_id: 'R1', job_id: 'job-1', recipe: { style_name: 'warm' } } }))[0].json;
   check('a reel that passes QC is announced as ready', passed.reply_text.includes('Your reel is ready'), true);
   check('and a rescale is reported rather than hidden', passed.reply_text.includes('plan rescaled'), true);
-  check('the session is closed once the reel is good',
-    JSON.parse(BUCKET.get('reels-compose-sessions/9.json')).deleted, true);
+  check('the edit it actually came out with is reported', passed.reply_text.includes('Camera: push_in'), true);
+  check('and so is the caption style', passed.reply_text.includes('karaoke_gold'), true);
+  // The session used to be dropped here. It now carries the finished reel
+  // through the upload question, or answering "yes" would have nothing to post.
+  check('the reel is offered for upload rather than just announced',
+    passed.reply_text.includes('Upload it?'), true);
+  const held = JSON.parse(BUCKET.get('reels-compose-sessions/9.json'));
+  check('the session waits on that answer', held.state, 'awaiting_publish');
+  check('and it knows what to post', held.output_key, 'reels-final/R1.mp4');
+  check('the caption is written while the manifest is still in hand',
+    held.publish_copy.instagram_caption.includes('T'), true);
+  check('the YouTube title is tagged as a Short', held.publish_copy.youtube_title.includes('#Shorts'), true);
+  // Telegram refuses a video caption over 1024 characters.
+  check('the video caption fits what Telegram accepts', passed.video_caption.length <= 1024, true);
 
   BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({ run_id: 'R1', clips: [], manifest }));
   COMPOSER_JOB = { status: 'done', output_url: 'https://b/final.mp4', output_key: 'reels-final/R1.mp4',
@@ -415,12 +586,78 @@ async function main() {
   const fallback = (await runNode('OpenRouter Render Director', { json: { chat_id: '9' } }))[0].json;
   check('a broken style response falls back instead of failing', fallback.style.style_name, 'clean commercial');
 
+  // ---- upload, once it has been asked for ---------------------------------
+  console.log('\nupload');
+  const awaiting = () => BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({
+    run_id: 'R1', chat_id: '9', state: 'awaiting_publish', manifest,
+    output_key: 'reels-final/R1.mp4', output_url: 'https://b/final.mp4',
+    expires_at: Date.now() + 3600000,
+    publish_copy: { instagram_caption: 'cap', youtube_title: 'T #Shorts', youtube_description: 'd', youtube_tags: ['vending'] },
+  }));
+
+  awaiting();
+  const declined = (await runNode('Handle Publish Answer', { json: { chat_id: '9', compose_action: 'publish_no' } }))[0].json;
+  check('answering no closes the session', JSON.parse(BUCKET.get('reels-compose-sessions/9.json')).deleted, true);
+  check('and says the link is still good', declined.reply_text.includes('7 days'), true);
+  check('nothing was sent anywhere', PUBLISH_PAYLOAD, null);
+
+  awaiting();
+  const accepted = (await runNode('Handle Publish Answer', { json: { chat_id: '9', compose_action: 'publish_yes' } }))[0].json;
+  check('answering yes starts the upload', accepted.publish_job_id, 'pub-1');
+  check('the reel it posts is the one that was rendered', PUBLISH_PAYLOAD.output_key, 'reels-final/R1.mp4');
+  check('the caption written earlier is what goes out', PUBLISH_PAYLOAD.instagram.caption, 'cap');
+  check('and the YouTube metadata with it', PUBLISH_PAYLOAD.youtube.title, 'T #Shorts');
+  check('the session records that it is uploading',
+    JSON.parse(BUCKET.get('reels-compose-sessions/9.json')).state, 'publishing');
+
+  PUBLISH_JOB = { status: 'processing' };
+  const stillGoing = (await runNode('Poll Publish Job', { json: { chat_id: '9', run_id: 'R1', publish_job_id: 'pub-1', poll_attempt: 0 } }))[0].json;
+  check('an upload in flight keeps polling', stillGoing.poll_again, true);
+
+  PUBLISH_JOB = { status: 'done', results: {
+    instagram: { ok: true, url: 'https://instagram.com/reel/A' },
+    youtube: { ok: true, url: 'https://youtube.com/shorts/B' },
+  } };
+  const posted = (await runNode('Poll Publish Job', { json: { chat_id: '9', run_id: 'R1', publish_job_id: 'pub-1', poll_attempt: 1 } }))[0].json;
+  check('both platforms are reported with their links',
+    [posted.reply_text.includes('https://instagram.com/reel/A'), posted.reply_text.includes('https://youtube.com/shorts/B')],
+    [true, true]);
+  check('and the session is finally closed', JSON.parse(BUCKET.get('reels-compose-sessions/9.json')).deleted, true);
+
+  // One platform failing must not read as total success or total failure.
+  awaiting();
+  PUBLISH_JOB = { status: 'done', results: {
+    instagram: { ok: false, error: 'The video file is invalid' },
+    youtube: { ok: true, url: 'https://youtube.com/shorts/B' },
+  } };
+  const partial = (await runNode('Poll Publish Job', { json: { chat_id: '9', run_id: 'R1', publish_job_id: 'pub-1', poll_attempt: 1 } }))[0].json;
+  check('a half-successful upload says which half', partial.reply_text.includes('the rest did not go'), true);
+  check('and why the other failed', partial.reply_text.includes('The video file is invalid'), true);
+
+  awaiting();
+  PUBLISH_JOB = { status: 'done', results: {
+    instagram: { ok: false, skipped: true, reason: 'not configured — set IG_USER_ID and IG_ACCESS_TOKEN on the composer service' },
+    youtube: { ok: false, skipped: true, reason: 'not configured — set YT_CLIENT_ID, YT_CLIENT_SECRET and YT_REFRESH_TOKEN on the composer service' },
+  } };
+  const unconfigured = (await runNode('Poll Publish Job', { json: { chat_id: '9', run_id: 'R1', publish_job_id: 'pub-1', poll_attempt: 1 } }))[0].json;
+  check('nothing configured is not reported as a failure',
+    unconfigured.reply_text.includes('no platform is configured yet'), true);
+  check('and it names the keys to set', unconfigured.reply_text.includes('IG_USER_ID'), true);
+
+  // "yes" on its own, with nothing rendered, has to say what it would have meant.
+  BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({ deleted: true }));
+  const stray = (await runNode('Handle Publish Answer', { json: { chat_id: '9', compose_action: 'publish_yes' } }))[0].json;
+  check('a stray yes explains itself', stray.reply_text.includes('Nothing is waiting to be uploaded'), true);
+
+  BUCKET.set('reels-compose-sessions/9.json', JSON.stringify({
+    state: 'collecting', run_id: 'R1', chat_id: '9', manifest, expires_at: Date.now() + 3600000,
+  }));
   const cancelled = await runNode('Handle Status Cancel', { json: { chat_id: '9', compose_action: 'cancel' } });
   check('cancel clears the session', JSON.parse(BUCKET.get('reels-compose-sessions/9.json')).deleted, true);
   check('and says so', cancelled[0].json.reply_text.includes('cancelled'), true);
 
-  const orphan = await runNode('Handle Clip Upload WF1', {
-    json: { chat_id: '404', clip_file_name: 'clip1.mp4', message: { message_id: 1, chat: { id: 404 } } },
+  const orphan = await runClipUpload({
+    json: { chat_id: '404', clip_file_name: 'clip1.mp4', message: { message_id: 1, chat: { id: 404 }, video: { file_id: 'v1', file_name: 'clip1.mp4' } } },
     binary: { data: { mimeType: 'video/mp4', data: fake } } });
   check('a clip with no session gets a useful reply', orphan[0].json.reply_text.includes('/compose'), true);
 

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node test/audio_isolation.test.mjs && node test/sync_qc.test.mjs"
+    "test": "node test/looks.test.mjs && node test/publish.test.mjs && node test/audio_isolation.test.mjs && node test/sync_qc.test.mjs"
   },
   "engines": {
     "node": ">=20"

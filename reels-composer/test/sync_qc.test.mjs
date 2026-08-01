@@ -289,6 +289,60 @@ try {
     check('it still ends on the voiceover', Math.abs(qc.drift_sec) < 0.4, `drift ${qc.drift_sec}s`);
   }
 
+  console.log('\nrender: word-level captions, a move on every clip and a different cut at each');
+  {
+    // The look engine is unit-tested on its own; this is the one that proves
+    // libass accepts the karaoke tags, that a per-frame zoom survives a real
+    // encode, and that none of it moves the reel off the voiceover.
+    const share = 12 / CLIPS;
+    const captionCues = Array.from({ length: CLIPS }, (_, i) => {
+      const start = i * share;
+      const words = ['line', `number`, `${i + 1}`, 'of', 'the', 'voiceover'];
+      const step = share / words.length;
+      return {
+        start,
+        end: start + share,
+        text: words.join(' '),
+        words: words.map((text, w) => ({ text, start: start + w * step, end: start + (w + 1) * step })),
+      };
+    });
+
+    const workDir = join(dir, 'animated');
+    await fs.mkdir(workDir, { recursive: true });
+    const { qc, look } = await renderReel({
+      workDir,
+      clipUrls,
+      voiceoverUrl: `${base}/honest.wav`,
+      voiceoverSec: 12,
+      transitionSec: TRANSITION_SEC,
+      tailSec: TAIL_SEC,
+      captionCues,
+      recipe: {
+        clip_order: [1, 2, 3, 4, 5],
+        per_clip: planFor(12),
+        transitions: [
+          { type: 'smoothleft', duration_ms: 300 },
+          { type: 'circleopen', duration_ms: 300 },
+          { type: 'dissolve', duration_ms: 300 },
+          { type: 'slideup', duration_ms: 300 },
+        ],
+        motion: ['push_in', 'pan_right', 'pull_out', 'tilt_up', 'rise'],
+        finish: { vignette: 0.5, grain: 3 },
+        subtitles: CAN_BURN ? { mode: 'burn', preset: 'karaoke_gold' } : { mode: 'none' },
+        color: { saturation: 1, contrast: 1, brightness: 0 },
+      },
+    });
+
+    check('every clip got its own move', look.motions.join('/') === 'push_in/pan_right/pull_out/tilt_up/rise', look.motions.join('/'));
+    check('no two neighbouring cuts are the same', new Set(look.transitions).size === 4, look.transitions.join('/'));
+    if (CAN_BURN) {
+      check('the captions animate off the measured words', look.caption_words_measured && look.caption_animation === 'karaoke', look.caption_animation);
+    }
+    check('the reel still passes QC with all of it applied', qc.ok, JSON.stringify(qc.problems));
+    // The whole point of keeping motion out of the timing code.
+    check('a move on every clip does not shift the reel off the voiceover', Math.abs(qc.drift_sec) < 0.4, `drift ${qc.drift_sec}s`);
+  }
+
   console.log('\nrender: an ffmpeg that cannot burn captions says so up front');
   {
     const workDir = join(dir, 'nolibass');

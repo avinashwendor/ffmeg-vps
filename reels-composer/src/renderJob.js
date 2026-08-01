@@ -2,6 +2,20 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { downloadToFile } from './s3.js';
+import {
+  buildAss,
+  finishFilters,
+  motionFilter,
+  motionSequence,
+  normalizeCues,
+  pickTransitions,
+  resolveCaptionStyle,
+  resolveMotion,
+  scaleCues,
+  wrapCue,
+} from './looks.js';
+
+export { wrapCue, buildAss, normalizeCues, scaleCues, pickTransitions, motionFilter } from './looks.js';
 
 // ffmpeg sizes its thread pools from the *host* core count, not the container's
 // memory limit. On a big host that means x264 keeps (threads + lookahead)
@@ -95,61 +109,23 @@ export async function ffmpegHasFilter(name) {
   return new RegExp(`^\\s*\\S+\\s+${name}\\s`, 'm').test(listing);
 }
 
+// xfade grew most of its catalogue across ffmpeg 5.x, and naming a transition
+// this build does not have fails the filtergraph at the very last step — after
+// every clip has already been encoded. Read what is actually compiled in.
+let xfadeCache = null;
+export async function xfadeTransitions() {
+  if (!xfadeCache) {
+    xfadeCache = run('ffmpeg', ['-hide_banner', '-h', 'filter=xfade'])
+      .then(({ stdout }) => new Set(
+        [...stdout.matchAll(/^\s{5}(\w+)\s+-?\d+\s+\.\.FV/gm)].map((m) => m[1].toLowerCase())
+      ))
+      .catch(() => new Set(['fade']));
+  }
+  return xfadeCache;
+}
+
 function escapePath(p) {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''");
-}
-
-function srtTimeToAss(t) {
-  const [h, m, rest] = t.trim().split(':');
-  const [s, ms] = rest.split(',');
-  const cs = String(Math.floor(Number(ms) / 10)).padStart(2, '0');
-  return `${h}:${m}:${s}.${cs}`;
-}
-
-// ASS wants &HAABBGGRR — blue and red swapped relative to hex, alpha first.
-function hexToAss(hex, fallback) {
-  const m = String(hex || '').trim().match(/^#?([0-9a-f]{6})$/i);
-  if (!m) return fallback;
-  const [r, g, b] = [0, 2, 4].map((i) => m[1].slice(i, i + 2).toUpperCase());
-  return `&H00${b}${g}${r}`;
-}
-
-// Greedy wrap, then re-wrap to the balanced width so the last line is never a
-// single stranded word. libass would wrap an over-long cue on its own, but it
-// picks the break point and routinely leaves "the" alone on line two.
-export function wrapCue(text, size) {
-  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
-  if (!words.length) return '';
-  // Usable width is PlayResX minus the two 60px margins. Bold Arial averages
-  // about 0.55em per glyph, which is what decides how much fits on a line.
-  const perLine = Math.max(12, Math.floor(960 / ((Number(size) || 52) * 0.55)));
-
-  const wrap = (width) => {
-    const lines = [];
-    let line = '';
-    for (const w of words) {
-      const next = line ? `${line} ${w}` : w;
-      if (next.length <= width || !line) { line = next; continue; }
-      lines.push(line);
-      line = w;
-    }
-    if (line) lines.push(line);
-    return lines;
-  };
-
-  const lines = wrap(perLine);
-  if (lines.length < 2) return lines.join('\\N');
-  // Greedy fills each line to the brim and leaves the remainder stranded — a
-  // cue reading "…eleven months" / "flat". Squeeze the width down to the
-  // narrowest that still needs the same number of lines, which spreads the
-  // words evenly across them.
-  const longestWord = words.reduce((n, w) => Math.max(n, w.length), 0);
-  let best = lines;
-  for (let width = longestWord; width < perLine; width++) {
-    const candidate = wrap(width);
-    if (candidate.length <= lines.length) { best = candidate; break; }
-  }
-  return best.join('\\N');
 }
 
 // Every cue time scales by the same factor, because the whole timeline is one
@@ -221,50 +197,21 @@ export function voiceoverScale(plannedSec, actualSec) {
   return { scale, applied: true, reason: `plan rescaled ${scale.toFixed(4)}x — voiceover is really ${actual.toFixed(2)}s, plan assumed ${planned.toFixed(2)}s` };
 }
 
-export function srtToAss(srt, style = {}) {
-  const font = style.font || 'Arial';
-  const size = style.size || 52;
-  const primary = hexToAss(style.color, '&H00FFFFFF');
-  const outline = hexToAss(style.outline_color, '&H00000000');
-  // Reels and Shorts overlay the caption, handle and action buttons across the
-  // bottom of the frame. At 1920 tall that furniture eats roughly the lowest
-  // 320px, so subtitles sitting at 120 were being covered on the exact device
-  // people watch this on.
-  const marginV = Number(style.margin_v) || 340;
-  const blocks = String(srt || '').trim().split(/\n\n+/);
-  const events = [];
-  for (const block of blocks) {
-    const lines = block.split('\n');
-    const timeLine = lines.find((l) => l.includes('-->'));
-    if (!timeLine) continue;
-    const [start, end] = timeLine.split('-->').map((s) => s.trim());
-    const text = wrapCue(lines.slice(lines.indexOf(timeLine) + 1).join(' '), size);
-    if (!text) continue;
-    events.push(`Dialogue: 0,${srtTimeToAss(start)},${srtTimeToAss(end)},Default,,0,0,0,,${text}`);
-  }
-  return `[Script Info]
-ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,${font},${size},${primary},&H000000FF,${outline},&H80000000,-1,0,0,0,100,100,0,0,1,4,2,2,60,60,${marginV},1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-${events.join('\n')}
-`;
-}
-
 function defaultRecipe() {
   return {
     clip_order: [1, 2, 3, 4, 5],
     per_clip: [1, 2, 3, 4, 5].map((index) => ({ index, trim_start: 0, trim_end: null, speed: 1 })),
     transitions: [{ after_clip: 1, type: 'xfade', duration_ms: 300 }],
     audio: { voiceover_gain_db: 0, clip_audio_gain_db: -20, fade_in_ms: 200, fade_out_ms: 400 },
-    subtitles: { mode: 'burn', font: 'Arial', size: 52, color: '#FFFFFF', outline_color: '#000000' },
+    subtitles: { mode: 'burn', preset: 'clean_bold' },
     color: { saturation: 1.08, contrast: 1.05, brightness: 0.01 },
+    // Empty means "choose for me" — a reel where nothing moves reads as a
+    // slideshow, so a missing motion plan is filled in rather than left static.
+    motion: [],
+    finish: { vignette: 0, grain: 0, sharpen: 0 },
+    // Rotates the default motion and cut sequences so two runs of the same
+    // script do not come back as the same edit.
+    look_seed: 0,
   };
 }
 
@@ -309,27 +256,36 @@ export function normalizeRecipe(recipe) {
     audio: { ...base.audio, ...(recipe.audio || {}) },
     subtitles: { ...base.subtitles, ...(recipe.subtitles || {}) },
     color: { ...base.color, ...(recipe.color || {}) },
+    motion: Array.isArray(recipe.motion) ? recipe.motion : base.motion,
+    finish: { ...base.finish, ...(recipe.finish || {}) },
+    look_seed: Number(recipe.look_seed) || base.look_seed,
   };
 }
 
-async function normalizeClip(inputPath, outputPath, clipSpec, color) {
+async function normalizeClip(inputPath, outputPath, clipSpec, color, look = {}) {
   const trimStart = Number(clipSpec.trim_start || 0);
   const trimEnd = clipSpec.trim_end != null ? Number(clipSpec.trim_end) : null;
   const speed = Number(clipSpec.speed || 1) || 1;
-  const zoom = Number(clipSpec.zoom || 1) || 1;
   const sat = Number(color.saturation || 1);
   const con = Number(color.contrast || 1);
   const bri = Number(color.brightness || 0);
 
+  // The move has to complete over the clip's *rendered* length, which is what
+  // is left after the trim and the speed change.
+  const sourceLen = trimEnd != null && trimEnd > trimStart ? trimEnd - trimStart : null;
+  const renderedLen = sourceLen != null ? sourceLen / speed : Number(look.durationSec) || 4;
+  const motion = resolveMotion(look.motion, clipSpec.zoom);
+
   // setpts has to live in this same chain: -filter:v and -vf are aliases, so
-  // passing both silently drops the first one and the clip plays at 1x.
+  // passing both silently drops the first one and the clip plays at 1x. It also
+  // has to come *before* the motion, so the move is timed against the sped-up
+  // clip rather than the original.
   const vf = [
     speed !== 1 ? `setpts=PTS/${speed}` : null,
-    `scale=1080:1920:force_original_aspect_ratio=increase`,
-    `crop=1080:1920`,
-    zoom !== 1 ? `scale=iw*${zoom}:ih*${zoom},crop=1080:1920` : null,
+    motionFilter(motion, renderedLen),
     `fps=30`,
     `eq=saturation=${sat}:contrast=${con}:brightness=${bri}`,
+    ...finishFilters(look.finish),
     `setsar=1`,
   ].filter(Boolean).join(',');
 
@@ -341,7 +297,10 @@ async function normalizeClip(inputPath, outputPath, clipSpec, color) {
   await run('ffmpeg', args);
 }
 
-async function concatClips(clipPaths, outputPath, transitionMs = 300) {
+// `transitions` is one type per cut, in order. Their *duration* is deliberately
+// shared: the whole plan was built against a single transition_sec, and a cut
+// that overlaps more than budgeted takes the extra out of the voiceover.
+async function concatClips(clipPaths, outputPath, transitionMs = 300, transitions = []) {
   if (clipPaths.length === 1) {
     await fs.copyFile(clipPaths[0], outputPath);
     return;
@@ -356,9 +315,10 @@ async function concatClips(clipPaths, outputPath, transitionMs = 300) {
     const nextOut = isLast ? outputPath : join(tmpDir, `xfade_${i}.mp4`);
     const d = await ffprobeDuration(current);
     const offset = Math.max(0, d - transitionMs / 1000);
+    const type = transitions[i - 1] || 'fade';
     await run('ffmpeg', [
       '-y', ...filterThreadArgs(), '-i', current, '-i', clipPaths[i],
-      '-filter_complex', `[0:v][1:v]xfade=transition=fade:duration=${transitionMs / 1000}:offset=${offset}[v]`,
+      '-filter_complex', `[0:v][1:v]xfade=transition=${type}:duration=${transitionMs / 1000}:offset=${offset}[v]`,
       '-map', '[v]', '-an', ...encodeArgs(), nextOut,
     ]);
     if (current !== clipPaths[0]) await fs.rm(current, { force: true });
@@ -450,6 +410,7 @@ export async function renderReel({
   clipUrls,
   voiceoverUrl,
   subtitlesSrt,
+  captionCues,
   recipe,
   voiceoverSec,
   transitionSec: plannedTransitionSec,
@@ -460,7 +421,11 @@ export async function renderReel({
   const clipMap = new Map((clipUrls || []).map((c) => [Number(c.index), c.url || c]));
   const transitionMs = Number(r.transitions?.[0]?.duration_ms || 300);
 
-  const burningSubs = r.subtitles?.mode === 'burn' && Boolean(subtitlesSrt);
+  // Word-level cues when the TTS measured them, an SRT when it did not. The
+  // caption animations that need per-word timing degrade to a whole-cue pop
+  // rather than disappearing.
+  const cues = normalizeCues(captionCues, subtitlesSrt);
+  const burningSubs = r.subtitles?.mode === 'burn' && cues.length > 0;
   if (burningSubs && !(await ffmpegHasFilter('subtitles'))) {
     throw new Error(
       'This ffmpeg has no "subtitles" filter, so captions cannot be burned — it was built without libass. '
@@ -492,10 +457,22 @@ export async function renderReel({
     transitionSec: transitionMs / 1000,
     tailSec,
   });
-  const srt = scaleSrt(subtitlesSrt, timing.scale);
+  const scaledCues = scaleCues(cues, timing.scale);
+
+  // A move per clip, and a different one on either side of every cut. The
+  // director may name them; anything it left out comes from the rotating
+  // default sequence so no reel is ever five static shots in a row.
+  const defaults = motionSequence(order.length, r.look_seed);
+  const motions = order.map((_, i) => r.motion[i] || defaults[i]);
+  const transitions = pickTransitions(Math.max(0, order.length - 1), {
+    requested: r.transitions,
+    available: await xfadeTransitions(),
+    seed: r.look_seed,
+  });
 
   const normalized = [];
-  for (const index of order) {
+  for (let i = 0; i < order.length; i++) {
+    const index = order[i];
     const url = clipMap.get(index);
     if (!url) throw new Error(`Missing clip URL for index ${index}`);
     const rawPath = join(workDir, `clip-${index}-raw.mp4`);
@@ -503,7 +480,10 @@ export async function renderReel({
     await downloadToFile(url, rawPath);
     const spec = perClip.find((p) => Number(p.index) === index) || { index, trim_start: 0 };
     const actual = await ffprobeDuration(rawPath);
-    await normalizeClip(rawPath, normPath, fitToFootage(spec, actual), r.color);
+    await normalizeClip(rawPath, normPath, fitToFootage(spec, actual), r.color, {
+      motion: motions[i],
+      finish: r.finish,
+    });
     // Raw footage is the biggest thing on disk and is finished with once the
     // normalized copy exists; a small container should not hold five of them.
     await fs.rm(rawPath, { force: true });
@@ -511,15 +491,16 @@ export async function renderReel({
   }
 
   const concatPath = join(workDir, 'concat.mp4');
-  await concatClips(normalized, concatPath, transitionMs);
+  await concatClips(normalized, concatPath, transitionMs, transitions);
 
   const withAudioPath = join(workDir, 'with-audio.mp4');
   await muxVoiceover(concatPath, voicePath, withAudioPath, r.audio);
 
+  const captionStyle = resolveCaptionStyle(r.subtitles);
   let finalPath = withAudioPath;
-  if (r.subtitles?.mode === 'burn' && srt) {
+  if (burningSubs) {
     const assPath = join(workDir, 'subs.ass');
-    await fs.writeFile(assPath, srtToAss(srt, r.subtitles), 'utf8');
+    await fs.writeFile(assPath, buildAss(scaledCues, r.subtitles), 'utf8');
     const subsPath = join(workDir, 'final.mp4');
     await burnSubtitles(withAudioPath, assPath, subsPath);
     finalPath = subsPath;
@@ -532,5 +513,18 @@ export async function renderReel({
     streams: await ffprobeStreams(finalPath),
   });
 
-  return { finalPath, duration, qc, timing };
+  // What the reel actually ended up looking like, so the Telegram reply can say
+  // it rather than repeating back what the director asked for.
+  const look = {
+    motions,
+    transitions,
+    caption_preset: captionStyle.preset,
+    caption_animation: cues.some((c) => c.words?.length) || !['karaoke', 'word'].includes(captionStyle.animation)
+      ? captionStyle.animation
+      : 'pop',
+    caption_words_measured: cues.some((c) => c.words?.length),
+    finish: r.finish,
+  };
+
+  return { finalPath, duration, qc, timing, look };
 }

@@ -11,6 +11,10 @@ if str(BUILD_DIR) not in sys.path:
 
 from config import *  # noqa: F403
 from paths import AUTOMATIONS_DIR, MAIN_WORKFLOW_JSON, MAIN_WORKFLOW_NAME
+from workflow_common import resolve_telegram_chat_js, telegram_compose_js
+
+REELS_CHAT_RESOLVE_JS = resolve_telegram_chat_js("telegram_chat_id", TELEGRAM_CHAT_ID)
+TELEGRAM_COMPOSE_JS = telegram_compose_js(TELEGRAM_BOT_TOKEN)
 
 OPENROUTER_MODEL_FAST = "openai/gpt-5-mini"
 OPENROUTER_MODEL_HEAVY = "anthropic/claude-sonnet-5"
@@ -66,6 +70,13 @@ function fromBase64(b64) {{
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
+}}
+function toBase64(bytes) {{
+  const u8 = toBytes(bytes);
+  if (typeof Buffer !== 'undefined') return Buffer.from(u8).toString('base64');
+  let bin = '';
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return btoa(bin);
 }}
 function rotr(n, x) {{ return (x >>> n) | (x << (32 - n)); }}
 const SHA_K = new Uint32Array([
@@ -155,14 +166,36 @@ function encodePath(key) {{
 function hostName() {{
   return `${{BUCKET}}.${{ENDPOINT_HOST}}`;
 }}
+function decodeBufferJson(value) {{
+  if (value && typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {{
+    return new TextDecoder().decode(Uint8Array.from(value.data));
+  }}
+  return null;
+}}
 function readHttpText(res) {{
   if (res == null) return '';
   if (typeof res === 'string') return res;
+  const direct = decodeBufferJson(res);
+  if (direct != null) return direct;
   if (typeof res.body === 'string') return res.body;
   if (typeof res.data === 'string') return res.data;
+  const bodyBuf = decodeBufferJson(res.body);
+  if (bodyBuf != null) return bodyBuf;
+  const dataBuf = decodeBufferJson(res.data);
+  if (dataBuf != null) return dataBuf;
   if (typeof Buffer !== 'undefined' && res.body && Buffer.isBuffer(res.body)) return res.body.toString('utf8');
   if (typeof Buffer !== 'undefined' && res.data && Buffer.isBuffer(res.data)) return res.data.toString('utf8');
   return '';
+}}
+function parseS3JsonText(text) {{
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  const outer = JSON.parse(trimmed);
+  if (outer && outer.type === 'Buffer' && Array.isArray(outer.data)) {{
+    const inner = new TextDecoder().decode(Uint8Array.from(outer.data));
+    return JSON.parse(inner);
+  }}
+  return outer;
 }}
 async function s3Request(method, host, path, headers, body) {{
   const options = {{
@@ -193,8 +226,15 @@ function describeS3Error(err) {{
   return `HTTP ${{status || 'error'}}: ${{err.message || err}}`;
 }}
 async function putObject(key, body, contentType = 'application/octet-stream') {{
-  const bytes = toBytes(body);
   const uploadUrl = presignPutUrl(key);
+  // Pass JSON/text as a plain string. Wrapping in Buffer makes the n8n task
+  // runner persist a Buffer JSON envelope to S3 instead of the payload.
+  const requestBody = typeof body === 'string'
+    ? body
+    : (() => {{
+      const bytes = toBytes(body);
+      return typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes;
+    }})();
   try {{
     await this.helpers.httpRequest({{
       method: 'PUT',
@@ -202,7 +242,7 @@ async function putObject(key, body, contentType = 'application/octet-stream') {{
       headers: {{
         'Content-Type': contentType,
       }},
-      body: typeof Buffer !== 'undefined' ? Buffer.from(bytes) : bytes,
+      body: requestBody,
       json: false,
     }});
   }} catch (err) {{
@@ -249,7 +289,10 @@ function presignPutUrl(key) {{
   const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));
   return `https://${{host}}/${{encodePath(key)}}?${{query}}&X-Amz-Signature=${{signature}}`;
 }}
-function signGet(key) {{
+// Header-signed (not presigned) request against one key. Presigned GETs often
+// 403 inside the Code sandbox, which is why everything that reads or removes an
+// object goes through this.
+function signKeyRequest(method, key) {{
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\\.\\d{{3}}/g, '');
   const dateStamp = amzDate.slice(0, 8);
@@ -263,12 +306,15 @@ function signGet(key) {{
   const signedNames = Object.keys(headerMap).sort();
   const canonicalHeaders = signedNames.map((name) => `${{name}}:${{headerMap[name]}}\\n`).join('');
   const signedHeaders = signedNames.join(';');
-  const canonicalRequest = ['GET', '/' + encodePath(key), '', canonicalHeaders, signedHeaders, payloadHash].join('\\n');
+  const canonicalRequest = [method, '/' + encodePath(key), '', canonicalHeaders, signedHeaders, payloadHash].join('\\n');
   const credentialScope = `${{dateStamp}}/${{REGION}}/s3/aws4_request`;
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, sha256(canonicalRequest)].join('\\n');
   const signature = toHex(hmacSha256(getSigningKey(dateStamp), stringToSign));
   const authorization = `AWS4-HMAC-SHA256 Credential=${{ACCESS_KEY}}/${{credentialScope}}, SignedHeaders=${{signedHeaders}}, Signature=${{signature}}`;
   return {{ host, authorization, amzDate, payloadHash }};
+}}
+function signGet(key) {{
+  return signKeyRequest('GET', key);
 }}
 async function getObject(key) {{
   const {{ host, authorization, amzDate, payloadHash }} = signGet(key);
@@ -309,6 +355,34 @@ async function listObjects(prefix) {{
   }});
   return [...xml.matchAll(/<Key>([^<]+)<\\/Key>/g)].map((m) => m[1]);
 }}
+// Sizes as well as names, from the same one request. A clip key that exists
+// with zero bytes is a failed upload wearing the costume of a finished one, and
+// that is exactly what makes the bot say a clip arrived when it did not.
+async function listObjectsWithSize(prefix) {{
+  const {{ host, authorization, amzDate, payloadHash, canonicalQuery }} = signList(prefix);
+  const xml = await s3Request.call(this, 'GET', host, `/?${{canonicalQuery}}`, {{
+    'x-amz-content-sha256': payloadHash,
+    'x-amz-date': amzDate,
+    Authorization: authorization,
+  }});
+  return [...xml.matchAll(/<Contents>([\\s\\S]*?)<\\/Contents>/g)].map((m) => {{
+    const key = (m[1].match(/<Key>([^<]+)<\\/Key>/) || [, ''])[1];
+    const size = Number((m[1].match(/<Size>(\\d+)<\\/Size>/) || [, '0'])[1]);
+    return {{ key, size }};
+  }}).filter((o) => o.key);
+}}
+async function deleteObject(key) {{
+  const {{ host, authorization, amzDate, payloadHash }} = signKeyRequest('DELETE', key);
+  try {{
+    await s3Request.call(this, 'DELETE', host, `/${{encodePath(key)}}`, {{
+      'x-amz-content-sha256': payloadHash,
+      'x-amz-date': amzDate,
+      Authorization: authorization,
+    }});
+  }} catch (err) {{
+    throw new Error(`S3 DELETE ${{describeS3Error(err)}}`);
+  }}
+}}
 """
 
 
@@ -333,8 +407,7 @@ function composeSessionKey(chatId) {
 async function loadComposeSession(chatId) {
   try {
     const text = await getObject.call(this, composeSessionKey(chatId));
-    if (!text || !text.trim()) return null;
-    const session = JSON.parse(text);
+    const session = parseS3JsonText(text);
     if (!session?.run_id || session.deleted) return null;
     return session;
   } catch {
@@ -347,15 +420,100 @@ async function saveComposeSession(chatId, session) {
 async function deleteComposeSession(chatId) {
   await saveComposeSession.call(this, chatId, { deleted: true, deleted_at: Date.now() });
 }
-// Late-arriving uploads from a Telegram album run as parallel executions, so a
-// plain overwrite loses clips. Re-read and merge by index right before saving.
-async function mergeClipIntoSession(chatId, fallback, clip) {
-  const session = (await loadComposeSession.call(this, chatId)) || fallback;
-  session.clips = (session.clips || []).filter((c) => Number(c.index) !== Number(clip.index));
-  session.clips.push(clip);
-  session.clips.sort((a, b) => a.index - b.index);
-  await saveComposeSession.call(this, chatId, session);
-  return session;
+
+// ── WHICH CLIP WENT WHERE ──────────────────────────────────────────────────
+//
+// A Telegram album arrives as five *parallel* n8n executions. They all used to
+// load this one session object, add their clip, and save it back — so whichever
+// finished last silently threw away the other four. That is the whole reason
+// clips went missing and the bot asked for them again.
+//
+// Nothing about which clip landed where lives in the session any more. Each
+// execution writes its own object under its own key, and the answer is read
+// back by listing:
+//
+//   reels-compose-claims/{chat}/{run}/{slot}-{message_id}.json   the reservation
+//   reels-clips/{run}/clip-0N.mp4                                 the clip itself
+//
+// Two executions can no longer overwrite each other, because they never write
+// the same key. The slot number is *in* the key name so one LIST answers both
+// "which slots are taken" and "by which message" without reading any bodies.
+function claimPrefix(chatId, runId) {
+  return `reels-compose-claims/${chatId}/${runId}/`;
+}
+function claimKey(chatId, runId, slot, messageId) {
+  return `${claimPrefix(chatId, runId)}${String(slot).padStart(2, '0')}-${messageId}.json`;
+}
+async function listClaims(chatId, runId) {
+  const prefix = claimPrefix(chatId, runId);
+  const keys = await listObjects.call(this, prefix);
+  return keys.map((key) => {
+    const m = key.slice(prefix.length).match(/^(\\d{2})-(.+)\\.json$/);
+    return m ? { key, slot: Number(m[1]), message_id: m[2] } : null;
+  }).filter(Boolean);
+}
+async function claimSlot(chatId, runId, slot, messageId) {
+  await putObject.call(
+    this,
+    claimKey(chatId, runId, slot, messageId),
+    JSON.stringify({ slot, message_id: messageId, at: Date.now() }),
+    'application/json',
+  );
+}
+async function releaseClaim(chatId, runId, slot, messageId) {
+  try {
+    await deleteObject.call(this, claimKey(chatId, runId, slot, messageId));
+  } catch (_) {
+    // A claim that cannot be released is stale rather than fatal — the clip
+    // that owns the slot is what the render actually reads.
+  }
+}
+
+// Which slots hold a real clip, straight from the bucket. This is the source of
+// truth for /status, for "still need", and for whether `done` can run: a
+// session write that got lost can no longer hide a clip that is sitting there.
+async function clipsOnS3(runId) {
+  const objects = await listObjectsWithSize.call(this, `reels-clips/${runId}/`);
+  return objects
+    .map((o) => {
+      const m = o.key.match(/clip-(\\d+)\\.mp4$/i);
+      if (!m) return null;
+      const index = Number(m[1]);
+      if (!(index >= 1 && index <= 5)) return null;
+      // A zero-byte object is a PUT that died halfway. Treating it as an
+      // arrived clip is how a render ends up with a missing scene.
+      if (!(o.size > 0)) return null;
+      return { index, s3_key: o.key, size: o.size, url: presignGetUrl(o.key) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index);
+}
+
+// Take a slot, and settle it if someone else took the same one at the same
+// instant. Both executions see both claims and both apply the same rule — the
+// lower message id keeps the slot — so they always agree without talking.
+async function reserveSlot(chatId, runId, wantedSlot, messageId, takenSlots) {
+  const taken = new Set((takenSlots || []).map(Number));
+  const firstFree = (avoid) => {
+    for (let i = 1; i <= 5; i++) if (!taken.has(i) && i !== avoid) return i;
+    return 0;
+  };
+
+  let slot = wantedSlot >= 1 && wantedSlot <= 5 && !taken.has(wantedSlot) ? wantedSlot : firstFree(0);
+  let bumped = false;
+  for (let attempt = 0; attempt < 5 && slot; attempt++) {
+    await claimSlot.call(this, chatId, runId, slot, messageId);
+    const claims = await listClaims.call(this, chatId, runId);
+    const rivals = claims.filter((c) => c.slot === slot && c.message_id !== messageId);
+    if (!rivals.length) return { slot, bumped };
+    const loser = rivals.every((c) => String(messageId).localeCompare(String(c.message_id), undefined, { numeric: true }) > 0);
+    if (!loser) return { slot, bumped };
+    await releaseClaim.call(this, chatId, runId, slot, messageId);
+    for (const c of claims) taken.add(c.slot);
+    slot = firstFree(0);
+    bumped = true;
+  }
+  return { slot, bumped };
 }"""
 
 
@@ -366,136 +524,313 @@ def s3_session_js():
 
 # One naming convention, used in both directions: brand reference images are
 # read as partN/clipN, and Flow clips come back named clipN. Returns 1-5 or 0.
+#
+# The regex only wins on a name that was written for it. Google Flow hands back
+# names like "Whisk_a1b2c3.mp4" or "office breakroom wide.mp4", and a trailing
+# digit in a hash is not a clip number — so a name it cannot read confidently
+# goes to the model below rather than to the next free slot.
 CLIP_INDEX_FROM_NAME_JS = """
 function clipIndexFromName(name) {
   const s = String(name || '').toLowerCase();
   const tagged = s.match(/(?:^|[^a-z])(?:part|clip|scene|shot)[-_ ]?([1-5])(?![0-9])/);
   if (tagged) return Number(tagged[1]);
-  const trailing = s.replace(/\\.[a-z0-9]+$/, '').match(/([1-5])$/);
-  if (trailing) return Number(trailing[1]);
+  const base = s.replace(/\\.[a-z0-9]+$/, '');
+  // A digit at the end only counts when it is not the tail of a longer number
+  // or of something that looks like a generated id.
+  const trailing = base.match(/(?:^|[^0-9a-f])([1-5])$/);
+  if (trailing && !/[0-9a-f]{6,}$/.test(base.slice(0, -1))) return Number(trailing[1]);
   return 0;
 }"""
 
 
-def compose_clip_upload_js():
-    return s3_session_js() + CLIP_INDEX_FROM_NAME_JS + """
-const chatId = $json.chat_id || String($json.message?.chat?.id || '');
-if (!chatId) throw new Error('Missing chat_id on clip upload.');
+# When the filename carries no number, read the *name* instead of giving up and
+# dropping the clip into whatever slot happens to be free. Flow names downloads
+# after the prompt, so "man selecting snack lobby.mp4" genuinely does say which
+# scene it is — the scene briefs are right there in the manifest.
+CLIP_SLOT_FROM_MODEL_JS = f"""
+async function clipSlotFromModel(fileName, manifest, freeSlots) {{
+  const name = String(fileName || '').trim();
+  if (!name || !freeSlots.length) return null;
+  const beats = (manifest?.sync_windows || []).map((w, i) => ({{
+    slot: i + 1,
+    beat: w.narrative_beat || '',
+    on_screen_text: w.on_screen_text || '',
+    voiceover: w.spoken_text || '',
+    visual: w.scene?.visual_brief || '',
+    reference_image: w.reference_image_name || '',
+  }}));
+  if (!beats.length) return null;
 
-let session = await loadComposeSession.call(this, chatId);
-if (!session || session.state !== 'collecting') {
-  return [{ json: { chat_id: chatId, reply_text: 'No active compose session. Send /compose RUN_ID first.' } }];
-}
-if (Date.now() > session.expires_at) {
-  await deleteComposeSession.call(this, chatId);
-  return [{ json: { chat_id: chatId, reply_text: 'That compose session expired. Send /compose RUN_ID again — your clips are still on S3.' } }];
-}
+  try {{
+    const res = await this.helpers.httpRequest({{
+      method: 'POST',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      headers: {{
+        Authorization: 'Bearer {OPENROUTER_KEY}',
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://n8n.io',
+        'X-Title': 'Reels Clip Ordering',
+      }},
+      body: {{
+        model: {json.dumps(OPENROUTER_MODEL_FAST)},
+        response_format: {{ type: 'json_object' }},
+        messages: [
+          {{
+            role: 'system',
+            content: `A video file has come back from Google Flow and its name has no clip number in it. Work out which scene of a 5-clip short it belongs to, from the filename alone.
 
-const msg = $json.message || {};
-const messageId = String(msg.message_id || $json.file_id || Date.now());
-session.processed_messages = session.processed_messages || {};
-if (session.processed_messages[messageId]) {
-  const existing = session.processed_messages[messageId];
-  return [{ json: { chat_id: chatId, reply_text: `Clip ${existing}/5 already saved for this message.` } }];
-}
+Flow names a download after the prompt that made it, so the name usually describes the shot: the setting, who is in it, what they are doing. Match that against the scene briefs.
 
-const binary = $input.first().binary || {};
-const binKey = Object.keys(binary).find((k) => /video/i.test(String(binary[k]?.mimeType || '')))
-  || Object.keys(binary)[0];
-if (!binKey) {
-  throw new Error('No video binary on message. Turn Download ON in the Telegram Trigger node.');
-}
+Return ONE JSON object: {{"slot": <1-5 or null>, "confidence": <0-1>, "why": "<a few words>"}}
+- Only choose from the slots listed as still free.
+- Return null when the name is a hash, a camera default, or anything else that does not describe a shot. A wrong guess puts the reel out of order; null just falls through to the next free slot, which is no worse than not asking.`,
+          }},
+          {{
+            role: 'user',
+            content: JSON.stringify({{ filename: name, free_slots: freeSlots, scenes: beats }}, null, 2),
+          }},
+        ],
+      }},
+      json: true,
+      timeout: 45000,
+    }});
+    const content = res?.choices?.[0]?.message?.content || '';
+    const parsed = JSON.parse(content.replace(/```json\\n?/gi, '').replace(/```\\n?/g, '').trim());
+    const slot = Number(parsed?.slot);
+    const confidence = Number(parsed?.confidence);
+    if (!(slot >= 1 && slot <= 5) || !freeSlots.includes(slot)) return null;
+    // Below this it is guessing, and the next free slot is the honest answer.
+    if (!(confidence >= 0.55)) return null;
+    return {{ slot, confidence, why: String(parsed?.why || '').slice(0, 80) }};
+  }} catch (_) {{
+    // Naming a slot is a convenience. Never let it stop a clip being saved.
+    return null;
+  }}
+}}"""
 
-const raw = binary[binKey];
-let bytes;
-if (typeof raw.data === 'string') bytes = fromBase64(raw.data);
-else if (raw.data?.type === 'Buffer') bytes = Uint8Array.from(raw.data.data);
-else if (raw.data instanceof Uint8Array) bytes = raw.data;
-else throw new Error('Unexpected binary format from Telegram');
 
-// Order source #1 — the filename. Deterministic and race-free, which is why the
-// package message asks for clip1.mp4 … clip5.mp4.
-const fileName = String($json.clip_file_name || raw.fileName || '');
-let index = clipIndexFromName(fileName);
-let index_source = index ? 'filename' : '';
-
-// #2 — an explicit "3" or "clip 3" caption on the upload.
-if (!index && $json.caption_index) {
-  index = Number($json.caption_index);
-  index_source = 'caption';
-}
-
-// #3 — position within a Telegram album. Albums arrive as parallel executions,
-// so agree on an order via the shared session rather than arrival time.
-const mediaGroupId = msg.media_group_id ? String(msg.media_group_id) : null;
-if (!index && mediaGroupId) {
-  session.media_groups = session.media_groups || {};
-  let group = session.media_groups[mediaGroupId] || { message_ids: [] };
-  if (!group.message_ids.includes(messageId)) {
-    group.message_ids.push(messageId);
-    group.message_ids.sort((a, b) => Number(a) - Number(b));
+def prepare_clip_s3_upload_js():
+    return s3_session_js() + CLIP_INDEX_FROM_NAME_JS + CLIP_SLOT_FROM_MODEL_JS + REELS_CHAT_RESOLVE_JS + TELEGRAM_COMPOSE_JS + """
+function looksLikeMp4(bytes) {
+  if (!bytes || bytes.length < 12) return false;
+  const limit = Math.min(bytes.length - 4, 64);
+  for (let i = 0; i <= limit; i++) {
+    if (bytes[i] === 0x66 && bytes[i + 1] === 0x74 && bytes[i + 2] === 0x79 && bytes[i + 3] === 0x70) return true;
   }
-  session.media_groups[mediaGroupId] = group;
-  await saveComposeSession.call(this, chatId, session);
-  await new Promise((r) => setTimeout(r, 1500));
-  session = (await loadComposeSession.call(this, chatId)) || session;
-  group = session.media_groups?.[mediaGroupId] || group;
-  const groupIndex = group.message_ids.indexOf(messageId) + 1;
-  if (groupIndex >= 1 && groupIndex <= 5) {
-    index = groupIndex;
-    index_source = 'album order';
+  return false;
+}
+
+// The Telegram file node runs ahead of this one, so $json here is that node's
+// output. Everything about the original message comes from the classifier.
+const incoming = (() => {
+  try {
+    return $('Classify Compose Message').first().json || {};
+  } catch (_) {
+    return $json || {};
   }
-}
+})();
 
-// #4 — first free slot.
-const reserved = new Set(Object.values(session.processed_messages || {}).map(Number));
-for (const c of session.clips || []) reserved.add(Number(c.index));
+const staticData = $getWorkflowStaticData('global');
+let chatId = '';
+try {
+  chatId = resolveTelegramChatId(incoming, staticData);
 
-if (!index || index < 1 || index > 5 || reserved.has(index)) {
-  const wanted = index;
-  index = 0;
-  for (let i = 1; i <= 5; i++) {
-    if (!reserved.has(i)) { index = i; break; }
+  const session = await loadComposeSession.call(this, chatId);
+  if (!session || session.state !== 'collecting') {
+    return [{ json: { chat_id: chatId, reply_text: 'No active compose session. Send /compose RUN_ID first.' } }];
   }
-  index_source = wanted ? `slot ${wanted} taken, used next free` : 'next free slot';
+  if (Date.now() > session.expires_at) {
+    await deleteComposeSession.call(this, chatId);
+    return [{ json: { chat_id: chatId, reply_text: 'That compose session expired. Send /compose RUN_ID again — your clips are still on S3.' } }];
+  }
+
+  const runId = session.run_id;
+  const msg = incoming.message || {};
+  if (!detectTelegramVideo(msg)) {
+    return [{ json: { chat_id: chatId, reply_text: 'That message is not a video clip. Send an mp4 (album or forward is fine).' } }];
+  }
+
+  const messageId = String(msg.message_id || incoming.clip_file_id || Date.now());
+
+  // Everything about who holds which slot is read back from the bucket, never
+  // from a session field two parallel executions would fight over.
+  const [onS3, claims] = await Promise.all([
+    clipsOnS3.call(this, runId),
+    listClaims.call(this, chatId, runId),
+  ]);
+
+  const mine = claims.find((c) => c.message_id === messageId);
+  const landed = new Set(onS3.map((c) => c.index));
+  if (mine && landed.has(mine.slot)) {
+    return [{ json: { chat_id: chatId, reply_text: `Clip ${mine.slot}/5 is already saved from this message.` } }];
+  }
+
+  // Reading the bytes is where uploads were being lost. Three sources, in
+  // order: the Telegram file node that just ran, the trigger's own download,
+  // and finally the Bot API by file_id.
+  let loaded;
+  let readError = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      loaded = await loadTelegramVideoBytes.call(this, 0, msg);
+      if (loaded?.bytes?.length) break;
+    } catch (err) {
+      readError = err.message || String(err);
+    }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 1200 * attempt));
+  }
+  if (!loaded?.bytes?.length) {
+    return [{ json: {
+      chat_id: chatId,
+      reply_text: `Could not read that video — ${readError || 'Telegram returned no file'}. Send that one clip again on its own.`,
+    } }];
+  }
+  const bytes = loaded.bytes;
+
+  if (!looksLikeMp4(bytes)) {
+    return [{ json: {
+      chat_id: chatId,
+      reply_text: 'That file does not look like a valid mp4 (missing ftyp header). Re-export from Flow and send again.',
+    } }];
+  }
+
+  const fileName = String(incoming.clip_file_name || loaded.fileName || loaded.media?.file_name || '');
+
+  // Slots already spoken for: a clip on S3, or a live claim from another
+  // message in this same album.
+  const taken = new Set(landed);
+  for (const c of claims) if (c.message_id !== messageId) taken.add(c.slot);
+  const freeSlots = [1, 2, 3, 4, 5].filter((i) => !taken.has(i));
+  if (!freeSlots.length && !mine) {
+    return [{ json: { chat_id: chatId, reply_text: 'All 5 clip slots are filled. Send done to render, or /cancel to start over.' } }];
+  }
+
+  let wanted = clipIndexFromName(fileName);
+  let index_source = wanted ? 'filename' : '';
+
+  if (!wanted && incoming.caption_index) {
+    wanted = Number(incoming.caption_index);
+    index_source = 'caption';
+  }
+
+  // The name still says which clip it is even when it has no number in it.
+  if (!wanted) {
+    const guess = await clipSlotFromModel.call(this, fileName, session.manifest, freeSlots);
+    if (guess) {
+      wanted = guess.slot;
+      index_source = `name reads as "${guess.why}"`;
+    }
+  }
+
+  // Position in the album, as a last structural signal. Albums arrive as
+  // parallel executions, so the order is agreed from the claim keys — which
+  // already sort by message id — rather than from who got here first.
+  if (!wanted && msg.media_group_id) {
+    const groupIds = claims.map((c) => c.message_id).concat(messageId)
+      .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    const at = groupIds.indexOf(messageId) + 1;
+    if (at >= 1 && at <= 5) {
+      wanted = at;
+      index_source = 'album order';
+    }
+  }
+
+  const { slot: index, bumped } = await reserveSlot.call(this, chatId, runId, wanted, messageId, [...taken]);
+  if (!index) {
+    return [{ json: { chat_id: chatId, reply_text: 'All 5 clip slots are filled. Send done to render, or /cancel to start over.' } }];
+  }
+  if (!index_source) index_source = 'next free slot';
+  if (bumped || (wanted && wanted !== index)) {
+    index_source = `${index_source || 'order'} — slot ${wanted || index} was taken`;
+  }
+
+  const s3Key = `reels-clips/${runId}/clip-${String(index).padStart(2, '0')}.mp4`;
+  const upload_url = presignPutUrl(s3Key);
+
+  return [{
+    json: {
+      chat_id: chatId,
+      run_id: runId,
+      upload_url,
+      s3_key: s3Key,
+      index,
+      index_source,
+      file_name: fileName || null,
+      message_id: messageId,
+      clip_bytes: bytes.length,
+      bytes_source: loaded.source || 'unknown',
+    },
+    binary: {
+      clip: {
+        data: toBase64(bytes),
+        mimeType: 'video/mp4',
+        fileName: fileName || `clip-${index}.mp4`,
+      },
+    },
+  }];
+} catch (err) {
+  return [{ json: {
+    chat_id: chatId || String(incoming.chat_id || incoming.message?.chat?.id || ''),
+    reply_text: `Clip upload failed: ${err.message || err}`,
+  } }];
 }
-if (!index) {
-  return [{ json: { chat_id: chatId, reply_text: 'All 5 clip slots are filled. Send done to render, or /cancel to start over.' } }];
+"""
+
+
+def finalize_clip_upload_js():
+    return s3_session_js() + """
+const prep = $('Prepare Clip S3 Upload').first().json;
+const chatId = prep.chat_id;
+if (!chatId || !prep.s3_key) {
+  return [{ json: { chat_id: chatId || '', reply_text: prep.reply_text || 'Clip upload did not start.' } }];
 }
 
-session.processed_messages[messageId] = index;
-session.clips = (session.clips || []).filter((c) => Number(c.index) !== index);
-session.clips.push({ index, pending: true, message_id: messageId, reserved_at: Date.now() });
-session.clips.sort((a, b) => a.index - b.index);
-await saveComposeSession.call(this, chatId, session);
-
+const session = await loadComposeSession.call(this, chatId);
+if (!session) {
+  return [{ json: { chat_id: chatId, reply_text: 'Compose session lost during upload. Send /compose RUN_ID again.' } }];
+}
 const runId = session.run_id;
-const s3Key = `reels-clips/${runId}/clip-${String(index).padStart(2, '0')}.mp4`;
-await putObject.call(this, s3Key, bytes, 'video/mp4');
-const url = presignGetUrl(s3Key);
 
-session = await mergeClipIntoSession.call(this, chatId, session, {
-  index,
-  s3_key: s3Key,
-  url,
-  file_name: fileName || null,
-  index_source,
-  message_id: messageId,
-  uploaded_at: Date.now(),
-});
+// The PUT returning 200 is not proof the object is there and whole. Read the
+// bucket back — this is the check that stops "saved" from ever being a lie,
+// and a short read gets one retry before the slot is handed back.
+let onS3 = await clipsOnS3.call(this, runId);
+let mine = onS3.find((c) => Number(c.index) === Number(prep.index));
+if (!mine || (prep.clip_bytes && mine.size < prep.clip_bytes * 0.9)) {
+  await new Promise((r) => setTimeout(r, 2000));
+  onS3 = await clipsOnS3.call(this, runId);
+  mine = onS3.find((c) => Number(c.index) === Number(prep.index));
+}
 
-const have = new Set((session.clips || []).filter((c) => c.url).map((c) => Number(c.index)));
+if (!mine) {
+  // Free the slot so the resend does not have to fight the failed attempt.
+  await releaseClaim.call(this, chatId, runId, prep.index, prep.message_id);
+  return [{ json: {
+    chat_id: chatId,
+    reply_text: `Clip ${prep.index}/5 did not finish uploading to storage. Send that clip again — nothing else is affected.`,
+  } }];
+}
+
+const have = new Set(onS3.map((c) => Number(c.index)));
 const missing = [1, 2, 3, 4, 5].filter((i) => !have.has(i));
+const short = prep.clip_bytes && mine.size < prep.clip_bytes * 0.9
+  ? `\\nHeads up: stored ${(mine.size / 1048576).toFixed(1)}MB of ${(prep.clip_bytes / 1048576).toFixed(1)}MB — resend this clip if the render looks cut.`
+  : '';
 const tail = missing.length
   ? `Still need: ${missing.map((i) => `clip${i}.mp4`).join(', ')}`
   : 'All 5 in — send done to render.';
 return [{
   json: {
     chat_id: chatId,
-    reply_text: `Clip ${index}/5 saved from ${index_source} (${have.size}/5).\\n${tail}`,
+    reply_text: `Clip ${prep.index}/5 saved from ${prep.index_source} (${have.size}/5).${short}\\n${tail}`,
   },
 }];
 """
+
+
+def compose_clip_upload_js():
+    """Deprecated alias kept for imports/tests that referenced the old single node."""
+    return prepare_clip_s3_upload_js()
 
 
 LOAD_S3_BRAND_IMAGES_JS = s3_common_js() + S3_IMAGES_JS + """
@@ -909,8 +1244,12 @@ NODE_POSITIONS = {
     # Compose — clip upload
     "Classify Compose Message": [DX * 5, 180],
     "IF Clip Upload": [DX * 6, 180],
-    "Handle Clip Upload WF1": [DX * 7, 180],
-    "Reply Compose": [DX * 8, 180],
+    "Telegram Download Clip": [DX * 7, 180],
+    "Prepare Clip S3 Upload": [DX * 8, 180],
+    "IF Clip Needs S3 PUT": [DX * 9, 180],
+    "S3 PUT Clip": [DX * 10, 180],
+    "Finalize Clip Upload": [DX * 11, 180],
+    "Reply Compose": [DX * 12, 180],
     # Compose — session control
     "IF Compose Start": [DX * 5, 0],
     "Handle Compose Start": [DX * 6, 0],
@@ -923,6 +1262,17 @@ NODE_POSITIONS = {
     "Wait For Render": [DX * 8, 540],
     "Poll Render Job": [DX * 9, 540],
     "IF Poll Again": [DX * 10, 540],
+    # Compose — deliver the reel, then ask before posting it anywhere
+    "Download Reel": [DX * 11, 540],
+    "Send Reel Video": [DX * 12, 540],
+    "Ask To Publish": [DX * 13, 540],
+    # Publish — the answer to that question
+    "IF Publish Answer": [DX * 5, 360],
+    "Handle Publish Answer": [DX * 6, 360],
+    "IF Publish Started": [DX * 7, 360],
+    "Wait For Publish": [DX * 8, 360],
+    "Poll Publish Job": [DX * 9, 360],
+    "IF Publish Poll Again": [DX * 10, 360],
     # Research + topic pick
     "Tavily Search": [DX, 840],
     "Attach Run Context": [DX * 2, 840],
@@ -1006,14 +1356,15 @@ add_node("Telegram Trigger", "n8n-nodes-base.telegramTrigger", {
 }, 1.2, {"webhookId": nid()})
 
 add_node("Save Telegram Chat ID", "n8n-nodes-base.code", {
-    "jsCode": """const staticData = $getWorkflowStaticData('global');
+    "jsCode": REELS_CHAT_RESOLVE_JS + """const staticData = $getWorkflowStaticData('global');
 const from = $json.message?.from;
-const chat = $json.message?.chat;
 if (from?.is_bot) {
   throw new Error('That message came from a bot account. Open Telegram as yourself and message your bot with /start.');
 }
-if (chat?.type === 'private' && chat.id) {
-  staticData.telegram_chat_id = String(chat.id);
+try {
+  resolveTelegramChatId($json, staticData);
+} catch (_) {
+  // still pass through — later nodes will error with a clearer message
 }
 return [{ json: $json, binary: $input.first().binary }];"""
 }, 2)
@@ -1026,15 +1377,21 @@ function classifyComposeMessage(rawMessage) {
   const text = String(msg.text || msg.caption || '').trim();
   const video = msg.video;
   const doc = msg.document;
+  const animation = msg.animation;
   const isVideoDoc = doc && /^video\\//i.test(String(doc.mime_type || ''));
-  const isClip = !!(video || isVideoDoc);
+  const isClip = !!(video || isVideoDoc || animation?.file_id);
 
   let compose_action = 'ignore';
   if (/^\\/compose\\b/i.test(text)) compose_action = 'compose_start';
   else if (/^done$/i.test(text)) compose_action = 'done';
   else if (/^\\/cancel$/i.test(text)) compose_action = 'cancel';
   else if (/^\\/status$/i.test(text)) compose_action = 'status';
-  else if (/^\\/help$/i.test(text)) compose_action = 'help';
+  else if (/^\\/help$/i.test(text) || /^\\/start\\b/i.test(text)) compose_action = 'help';
+  // The answers to "upload it?". They only mean anything against a reel that
+  // has finished rendering, and the handler says so when there is not one —
+  // routing them here is what lets a bare "yes" work at all.
+  else if (/^(?:\\/)?(yes|y|yeah|yep|yup|ok|okay|upload|publish|post|go)\\b$/i.test(text)) compose_action = 'publish_yes';
+  else if (/^(?:\\/)?(no|n|nope|nah|skip|stop)\\b$/i.test(text)) compose_action = 'publish_no';
   else if (isClip) compose_action = 'clip_upload';
 
   const runIdMatch = text.match(/^\\/compose\\s+(\\S+)/i);
@@ -1047,7 +1404,11 @@ function classifyComposeMessage(rawMessage) {
     text,
     run_id: runIdMatch ? runIdMatch[1].trim() : null,
     caption_index: captionIndex ? Number(captionIndex[1]) : null,
-    clip_file_name: String(doc?.file_name || video?.file_name || ''),
+    clip_file_name: String(doc?.file_name || video?.file_name || animation?.file_name || ''),
+    // The Telegram node downloads by file_id using the workflow's own
+    // credential, which is a far more reliable way to get the bytes than
+    // hoping the trigger's download attached them.
+    clip_file_id: String(video?.file_id || (isVideoDoc ? doc.file_id : '') || animation?.file_id || ''),
     message: msg,
   };
 }"""
@@ -1076,17 +1437,20 @@ add_node("IF Compose Route", "n8n-nodes-base.if", {
     "looseTypeValidation": True, "options": {},
 }, 2.2)
 
-CLASSIFY_COMPOSE_JS = COMPOSE_ACTION_JS + """
+CLASSIFY_COMPOSE_JS = COMPOSE_ACTION_JS + REELS_CHAT_RESOLVE_JS + """
+const staticData = $getWorkflowStaticData('global');
 const parsed = classifyComposeMessage($json.message);
+const chat_id = resolveTelegramChatId({ ...parsed, message: $json.message }, staticData);
 
 return [{
   json: {
     ...$json,
     compose_action: parsed.compose_action,
-    chat_id: parsed.chat_id,
+    chat_id,
     run_id: parsed.run_id,
     caption_index: parsed.caption_index,
     clip_file_name: parsed.clip_file_name,
+    clip_file_id: parsed.clip_file_id,
     message: parsed.message,
   },
   binary: $input.first().binary,
@@ -1108,8 +1472,49 @@ add_node("IF Clip Upload", "n8n-nodes-base.if", {
     "looseTypeValidation": True, "options": {},
 }, 2.2)
 
-add_node("Handle Clip Upload WF1", "n8n-nodes-base.code", {
-    "jsCode": compose_clip_upload_js(),
+# Ask Telegram for the file directly, by file_id, using the workflow's own bot
+# credential. The trigger's own download is best-effort — under an album of five
+# it drops files, which is what produced "Could not read the video bytes" and
+# left the reel a clip short. This node retries, and the Code node behind it
+# still falls back to the trigger's binary and then to the Bot API.
+add_node("Telegram Download Clip", "n8n-nodes-base.telegram", {
+    "resource": "file",
+    "fileId": "={{ $json.clip_file_id }}",
+    "download": True,
+}, 1.2, {
+    "webhookId": nid(),
+    "onError": "continueRegularOutput",
+    "retryOnFail": True,
+    "maxTries": 3,
+    "waitBetweenTries": 2000,
+})
+
+add_node("Prepare Clip S3 Upload", "n8n-nodes-base.code", {
+    "jsCode": prepare_clip_s3_upload_js(),
+}, 2)
+
+add_node("IF Clip Needs S3 PUT", "n8n-nodes-base.if", {
+    "conditions": {
+        "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+        "conditions": [
+            {"id": nid(), "leftValue": "={{ $json.upload_url }}", "rightValue": "", "operator": {"type": "string", "operation": "notEmpty"}},
+        ],
+        "combinator": "and",
+    },
+    "looseTypeValidation": True, "options": {},
+}, 2.2)
+
+add_node("S3 PUT Clip", "n8n-nodes-base.httpRequest", {
+    "method": "PUT",
+    "url": "={{ $json.upload_url }}",
+    "sendBody": True,
+    "contentType": "binaryData",
+    "inputDataFieldName": "clip",
+    "options": S3_PUT_RESPONSE_OPTS,
+}, 4.2, {"retryOnFail": True, "maxTries": 3, "waitBetweenTries": 2000})
+
+add_node("Finalize Clip Upload", "n8n-nodes-base.code", {
+    "jsCode": finalize_clip_upload_js(),
 }, 2)
 
 add_node("Reply Compose", "n8n-nodes-base.telegram", {
@@ -1123,7 +1528,7 @@ add_node("IF Delegate Compose", "n8n-nodes-base.if", {
         "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
         "conditions": [
             {"id": nid(), "leftValue": "={{ $json.compose_action }}", "rightValue": action, "operator": {"type": "string", "operation": "equals"}}
-            for action in ("compose_start", "done", "status", "cancel", "help")
+            for action in ("compose_start", "done", "status", "cancel", "help", "publish_yes", "publish_no")
         ],
         "combinator": "or",
     },
@@ -1175,10 +1580,9 @@ const p = (n) => String(n).padStart(2, '0');
 const run_id = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;"""
 
 add_node("Set Manual Context", "n8n-nodes-base.code", {
-    "jsCode": RUN_ID_JS + """
+    "jsCode": RUN_ID_JS + REELS_CHAT_RESOLVE_JS + """
 const staticData = $getWorkflowStaticData('global');
-const chat_id = String($json.message.chat.id);
-staticData.telegram_chat_id = chat_id;
+const chat_id = resolveTelegramChatId($json, staticData);
 const topic_mode = $json.topic_mode || 'picker';
 const custom_topic = String($json.custom_topic || '').trim();
 const topic_rank = $json.topic_rank || null;
@@ -1224,12 +1628,9 @@ return [{ json: {
 }, 2)
 
 add_node("Set Scheduled Context", "n8n-nodes-base.code", {
-    "jsCode": RUN_ID_JS + """
+    "jsCode": RUN_ID_JS + REELS_CHAT_RESOLVE_JS + """
 const staticData = $getWorkflowStaticData('global');
-const chat_id = staticData.telegram_chat_id;
-if (!chat_id) {
-  throw new Error('No Telegram chat_id saved. Message your reels bot /start from your personal account first.');
-}
+const chat_id = resolveTelegramChatId($json, staticData);
 return [{ json: {
   chat_id,
   trigger_mode: 'scheduled',
@@ -2022,6 +2423,11 @@ const timing_source = useTimings
 
 const sync_windows = [];
 const srtBlocks = [];
+// The same cues the SRT is built from, but carrying where every word inside
+// them falls. The composer needs that to animate a caption word by word — an
+// SRT can only say when a whole line appears, so karaoke and word-punch styles
+// have nothing to work from without this.
+const caption_cues = [];
 let cueNumber = 0;
 
 for (let i = 0; i < CLIP_COUNT; i++) {{
@@ -2093,7 +2499,28 @@ for (let i = 0; i < CLIP_COUNT; i++) {{
     const cueEnd = c === cues.length - 1 ? vo_end : Math.min(vo_end, cueStarts[c + 1]);
     if (cueEnd <= cueStart) continue;
     cueNumber += 1;
-    srtBlocks.push(`${{cueNumber}}\\n${{srtStamp(cueStart)}} --> ${{srtStamp(cueEnd)}}\\n${{cues[c].map((k) => wordsHere[k]).join(' ')}}`);
+    const cueText = cues[c].map((k) => wordsHere[k]).join(' ');
+    srtBlocks.push(`${{cueNumber}}\\n${{srtStamp(cueStart)}} --> ${{srtStamp(cueEnd)}}\\n${{cueText}}`);
+
+    // Word timings only go out when they were actually measured. Sharing out a
+    // cue by syllable weight is fine for deciding when a line appears and
+    // nowhere near tight enough to light up one word at a time — a caption that
+    // highlights the wrong word is worse than one that does not move at all.
+    const base = sceneStartIndex[i];
+    const words = useTimings
+      ? cues[c].map((k) => ({{
+        text: wordsHere[k],
+        start: round2(Math.max(cueStart, Number(aligned[base + k].start))),
+        end: round2(Math.min(cueEnd, Math.max(Number(aligned[base + k].end), Number(aligned[base + k].start) + 0.06))),
+      }}))
+      : null;
+    caption_cues.push({{
+      start: round2(cueStart),
+      end: round2(cueEnd),
+      text: cueText,
+      scene_index: i,
+      words,
+    }});
   }}
 
   sync_windows.push({{
@@ -2136,6 +2563,8 @@ return [{{ json: {{
   ...ctx,
   sync_windows,
   subtitles_srt,
+  caption_cues,
+  caption_words_measured: useTimings,
   voiceover_sec,
   voiceover_duration_source: duration_source,
   caption_timing_source: timing_source,
@@ -2302,6 +2731,10 @@ const manifest = {
   voiceover_url: ctx.voiceover_url,
   voiceover_key: ctx.voiceover_key,
   subtitles_srt: ctx.subtitles_srt || '',
+  // Word-level cues for the animated caption styles; the SRT stays as the
+  // fallback for a run whose TTS did not report where the words fell.
+  caption_cues: ctx.caption_cues || [],
+  caption_words_measured: Boolean(ctx.caption_words_measured),
   sync_windows: ctx.sync_windows || [],
   // Timing the render needs so the picture lands on the voiceover. The composer
   // reprobes the mp3 and rescales against voiceover_sec, so it must travel too.
@@ -2432,8 +2865,10 @@ const sections = [
     clipNames.map((n) => `  ${n}`).join('\\n'),
     ``,
     `I read the clip number out of the filename, so you can send them in any`,
-    `order, all at once, as an album. If a name has no number I fall back to`,
-    `the caption — send the clip with just "1", "2" and so on.`,
+    `order, all at once, as an album. If a name has no number I read the name`,
+    `against the scene briefs instead — or send the clip with just "1", "2".`,
+    `Every clip is verified in storage after it uploads, so nothing goes missing`,
+    `quietly: if one fails I name it and you resend only that one.`,
   ].join('\\n'),
   flowText ? `FLOW PROMPTS (one clip per block, paste into Google Flow)\\n${flowText}` : '',
   [
@@ -2442,6 +2877,8 @@ const sections = [
     `1) /compose ${ctx.run_id}`,
     `2) send the 5 clips`,
     `3) send done`,
+    `4) I send the finished reel back and ask — yes posts it to Instagram Reels`,
+    `   and YouTube Shorts, no stops there`,
   ].join('\\n'),
   ctx.manifest_url ? `MANIFEST (7-day link)\\n${ctx.manifest_url}` : '',
 ];
@@ -2472,7 +2909,10 @@ Telegram bot credential on the Trigger and on every Telegram node, then send
 
 ### Telegram chat ID
 Your personal user ID from @userinfobot — never the bot's own ID, which
-produces "bot can't send messages to the bot". Any `/start` saves it for you.
+produces "bot can't send messages to the bot". Any message (including /start
+or /help) saves it automatically. Optional fallback: set TELEGRAM_CHAT_ID in
+build/secrets_local.py and rebuild if scheduled runs fire before anyone has
+messaged the bot.
 
 ### Commands
 - `/generate` — research, then reply `1`–`5` to pick a topic
@@ -2506,7 +2946,31 @@ their own Telegram message; the Flow prompts reference images by name only.
 The package tells you to save each download as `RUNID-clip1.mp4` …
 `RUNID-clip5.mp4`. `/compose` reads the number out of the filename, so you
 can send all five at once in any order. Fallbacks, in order: filename →
-caption (`1`–`5`) → album position → first free slot.
+caption (`1`–`5`) → the fast model reading the filename against the scene
+briefs → album position → first free slot.
+
+Which clip took which slot is **not** kept in the session. Each upload writes
+its own object — `reels-compose-claims/{{chat}}/{{run}}/{{slot}}-{{message}}.json` —
+and the answer is read back by listing the bucket. An album arrives as five
+parallel executions, and a shared session object meant the last one to save
+threw away the other four. That is what made clips vanish and the bot ask for
+them again. Nothing is reported as saved until it has been read back from
+storage with a non-zero size.
+
+### Posting the reel
+The finished reel is sent back as a video, then the bot asks. `yes` uploads to
+Instagram Reels and YouTube Shorts, `no` closes the session. The upload runs on
+the composer service (`POST /v1/publish`, polled at `/v1/publish/{{id}}`), because
+YouTube needs the file's bytes on a resumable session and a Code node cannot
+carry a 20 MB video. Each platform reports separately — one failing never stops
+the other. Set on the Railway service:
+
+- `IG_USER_ID`, `IG_ACCESS_TOKEN` — Instagram Business account via the Graph API
+- `YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN` — YouTube Data API v3
+- optional `YT_PRIVACY_STATUS` (`public` by default; use `unlisted` while testing)
+
+`GET /health` reports `publish_targets`, so a missing key is visible before
+anyone answers `yes`.
 
 ### Models
 - Fast (`{OPENROUTER_MODEL_FAST}`): topics, image matching
@@ -2542,13 +3006,19 @@ connect("Route Compose vs Generate", "IF Compose Route")
 connect("IF Compose Route", "Classify Compose Message", 0)
 connect("Classify Compose Message", "IF Clip Upload")
 connect("Classify Compose Message", "IF Delegate Compose")
-connect("IF Clip Upload", "Handle Clip Upload WF1", 0)
-connect("Handle Clip Upload WF1", "Reply Compose")
+connect("IF Clip Upload", "Telegram Download Clip", 0)
+connect("Telegram Download Clip", "Prepare Clip S3 Upload")
+connect("Prepare Clip S3 Upload", "IF Clip Needs S3 PUT")
+connect("IF Clip Needs S3 PUT", "S3 PUT Clip", 0)
+connect("S3 PUT Clip", "Finalize Clip Upload")
+connect("Finalize Clip Upload", "Reply Compose")
+connect("IF Clip Needs S3 PUT", "Reply Compose", 1)
 
 import build_compose_workflow as compose_builder
 compose_builder.inject_compose_delegate_into_wf1(
     s3_session_js,
-    compose_clip_upload_js,
+    prepare_clip_s3_upload_js,
+    finalize_clip_upload_js,
     add_node,
     connect,
     delegate_if_name="IF Delegate Compose",

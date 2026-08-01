@@ -25,7 +25,7 @@ reels-composer/           # FFmpeg render API on Railway
 ```bash
 python3 build/build_workflow.py    # writes the JSON and validates it
 python3 build/test_reels_nodes.py  # executes the Code nodes
-npm --prefix reels-composer test   # renders real files through ffmpeg
+npm --prefix reels-composer test   # look engine, publish stubs, real renders
 ```
 
 `build_workflow.py` fails the build if any Code node does not parse. **Do not
@@ -151,15 +151,60 @@ manifest that under-estimates the voiceover by 10%.
 ## Clip naming is the contract
 
 The package message tells the user to save each Flow download as
-`RUNID-clip1.mp4` … `RUNID-clip5.mp4`. `Handle Clip Upload WF1` resolves the
-slot in this order: **filename → caption (`1`-`5`) → album position → first free
-slot**. Filename first makes ordering deterministic and race-free, which matters
-because a Telegram album arrives as several parallel n8n executions that all
-read and write the same session object.
+`RUNID-clip1.mp4` … `RUNID-clip5.mp4`. `Prepare Clip S3 Upload` resolves the
+slot in this order: **filename → caption (`1`-`5`) → the fast model reading the
+filename against the scene briefs → album position → first free slot**.
+
+The model step exists because Flow names downloads after the prompt, so
+`people browsing chips office lobby.mp4` genuinely does say which scene it is.
+It only answers with a free slot and only above 0.55 confidence — a wrong guess
+reorders the reel, while a null falls through to the next free slot, which is no
+worse than never asking. The filename regex was also tightened: a trailing hex
+digit in `Whisk_a1b2c3.mp4` is not a clip number, and reading it as one silently
+reordered reels.
 
 Brand reference images use the same convention in the other direction:
 `part1-…jpg` … `part5-…jpg` in `images/` map straight to clips 1-5 with no model
 involved.
+
+### Slot ownership is not in the session
+
+A Telegram album arrives as **five parallel n8n executions**. They all used to
+load the one session object, add their clip, and write it back — so whichever
+finished last threw away the other four. That is the whole reason clips went
+missing and the bot asked for them again, and why `/status` could show clip 2
+as waiting when it had already been sent.
+
+Nothing about which clip took which slot lives in the session now. Each
+execution writes its own key and the answer is read back by listing:
+
+- `reels-compose-claims/{chat}/{run}/{slot}-{message_id}.json` — the reservation
+- `reels-clips/{run}/clip-0N.mp4` — the clip itself
+
+Two executions can no longer overwrite each other because they never write the
+same key. The slot is *in* the key name, so one LIST answers both "which slots
+are taken" and "by whom" without reading any bodies. When two do claim the same
+slot, both see both claims and both apply the same rule — lowest message id
+keeps it — so they settle without coordinating.
+
+`/status`, the "still need" line and the `done` gate are all computed from
+`clipsOnS3()`, which lists `reels-clips/{run}/` **with sizes** and drops
+zero-byte objects. A dead PUT leaves a zero-byte key that otherwise looks
+exactly like an arrived clip.
+
+### Getting the bytes at all
+
+`Telegram Download Clip` (a Telegram node, resource *file*, `retryOnFail` ×3)
+now runs ahead of the Code node and fetches by `file_id` using the workflow's
+own bot credential. The trigger's own download is best-effort and drops files
+under an album of five — that is what produced "Could not read the video bytes".
+The Code node still falls back to the trigger's binary, then to the Bot API with
+`TELEGRAM_BOT_TOKEN`, and retries the whole read three times.
+
+`S3 PUT Clip` retries too, and **`Finalize Clip Upload` reads the object back**
+before saying a word. A 200 from the PUT is not proof the clip is there: if it
+is missing or short, the reply names that one clip and releases the claim so a
+resend can take the slot. "Saved" now means saved.
 
 ## Secrets
 
@@ -179,6 +224,7 @@ Note that the generated workflow JSON embeds these keys in plain text — treat
 
 - `reels-manifests/{run_id}.json`
 - `reels-clips/{run_id}/clip-01.mp4` … `clip-05.mp4`
+- `reels-compose-claims/{chat_id}/{run_id}/{slot}-{message_id}.json`
 - `reels-voiceovers/{slug}-{run_id}.mp3`
 - `reels-final/{run_id}.mp4`
 - `reels-compose-sessions/{chat_id}.json`
@@ -240,6 +286,88 @@ the host's core count, not the container's memory limit, so x264 held
 two streams decode at once. One clip fit, two did not. Threads and lookahead
 are now capped; a null exit reports the OOM plainly instead of dumping raw
 progress output.
+
+## The look — motion, cuts and captions
+
+`reels-composer/src/looks.js` owns everything about how the reel *looks*. It is
+deliberately separate from `renderJob.js`, which owns timing, and it cannot
+desync a reel: motion is a crop over footage that has already been trimmed to
+the frame, every cut shares one duration the plan was built against, and
+captions are read off word timings the workflow measured.
+
+**Motion.** Every clip gets a slow move, and neighbouring clips get different
+ones so the cut has something to cut on. Eleven presets (`push_in`, `pan_right`,
+`tilt_up`, `rise`, …), each expressed as a start and end framing. Two
+implementations, picked by whether the zoom actually changes:
+
+- fixed zoom → one `scale` and a `crop` with per-frame x/y. Nothing resamples.
+- changing zoom → `scale` with `eval=frame`, then a crop.
+
+That second one is deliberately **not** `zoompan`, which is the filter usually
+reached for here. Measured on a 10s 1080x1920 clip: zoompan 16s, `eval=frame`
+11s. Five clips a render is where that starts to matter.
+
+**Cuts.** One xfade type per boundary, from a catalogue of 23. A fade at all
+four cuts is the single thing that makes a short look auto-generated. Durations
+stay identical across all four — the plan gave each clip its screen time against
+one crossfade length, so varying it would shorten the reel. `xfadeTransitions()`
+reads what this ffmpeg build actually has, because xfade grew most of its
+catalogue across 5.x and naming a missing type fails the filtergraph at the very
+last step, after every clip has already encoded.
+
+**Captions.** Eight presets over six animations: `none`, `fade`, `pop`, `rise`,
+`karaoke` (per-word `\kf` sweep) and `word` (one word at a time). The last two
+need per-word timings, which is why `Build Sync Map` now emits `caption_cues`
+carrying every word's start and end alongside the SRT. Without them both degrade
+to `pop` rather than disappearing — and `OpenRouter Render Director` is told
+whether timings exist and swaps the preset itself if the model picks one anyway.
+Estimated timings are never good enough to light up individual words; a caption
+highlighting the wrong word is worse than one that does not move.
+
+The director now chooses `motion`, `transitions`, `subtitles.preset`, `finish`
+(vignette/grain/sharpen) and `color`. Everything it returns is validated by the
+composer and falls back on anything unrecognised, so a model inventing a
+transition name can never fail a render. The defaults still move and still
+animate — a fallback that renders five static shots with flat subtitles is a
+worse reel, not a safer one.
+
+`reels-composer/test/looks.test.mjs` runs every motion through real ffmpeg and
+checks the frame comes out 1080x1920. Burning captions needs libass, which many
+developer machines lack; the ASS *files* are still validated by having ffprobe
+read each preset back (the ass demuxer is separate from the libass-backed
+`subtitles` filter).
+
+## Posting the reel
+
+The finished reel goes back to Telegram as a **video**, not a link — n8n
+downloads it and uploads the bytes, because Telegram will only fetch a URL
+itself up to 20 MB and a 50s 1080x1920 encode goes past that. Then the bot asks.
+`yes` publishes, `no` closes the session. The session is no longer dropped when
+the render finishes; it carries the reel and its captions through that question,
+so answering an hour later still works.
+
+The upload runs on the composer (`POST /v1/publish`, polled at
+`/v1/publish/{id}`) rather than in n8n, because YouTube wants the file's bytes
+on a resumable session and a Code node cannot carry a 20 MB video through the
+task runner.
+
+- **Instagram** is a three-step publish: create a REELS container from a URL
+  Graph can fetch, poll until `status_code` is `FINISHED`, then publish.
+  Publishing a container that is still `IN_PROGRESS` fails with an error that
+  does not say why, which is the mistake worth knowing about.
+- **YouTube** refreshes an OAuth token, opens a resumable session, and streams
+  the file to the `Location` header it returns.
+
+The two are independent: one being unconfigured, rate-limited or rejected never
+stops the other, and every outcome is reported per platform. "Nothing was
+configured" is reported differently from "both failed" — the first names the
+variables to set.
+
+Railway service variables: `IG_USER_ID`, `IG_ACCESS_TOKEN`,
+`YT_CLIENT_ID`, `YT_CLIENT_SECRET`, `YT_REFRESH_TOKEN`, and optionally
+`YT_PRIVACY_STATUS` (`unlisted` while testing). `GET /health` reports
+`publish_targets` so a missing key is visible before anyone answers `yes`.
+`reels-composer/test/publish.test.mjs` drives both against stub servers.
 
 ## Only the voiceover is ever heard
 
